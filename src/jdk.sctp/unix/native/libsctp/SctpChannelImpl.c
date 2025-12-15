@@ -248,7 +248,7 @@ void handleSendFailed
                 return;
             }
 
-            if (rv != (dataLength - alreadyRead) || !(msg->msg_flags & MSG_EOR)) {
+            if (rv != (dataLength - alreadyRead) /* || !(msg->msg_flags & MSG_EOR) */) {
                 //TODO: assert false: "should not reach here";
                 free(addressP);
                 return;
@@ -465,7 +465,7 @@ JNIEXPORT jint JNICALL Java_sun_nio_ch_sctp_SctpChannelImpl_receive0
             union sctp_notification *snp;
             jboolean allocated = JNI_FALSE;
 
-            if (!(msg->msg_flags & MSG_EOR) && length < SCTP_NOTIFICATION_SIZE) {
+            if (/* !(msg->msg_flags & MSG_EOR) && */ length < SCTP_NOTIFICATION_SIZE) {
                 char* newBuf;
                 int rvSAVE = rv;
 
@@ -488,7 +488,7 @@ JNIEXPORT jint JNICALL Java_sun_nio_ch_sctp_SctpChannelImpl_receive0
             }
             snp = (union sctp_notification *) bufp;
             if (handleNotification(env, fd, resultContainerObj, snp, rv,
-                                   (msg->msg_flags & MSG_EOR),
+                                   0 /* (msg->msg_flags & MSG_EOR) */,
                                    &sa.sa) == JNI_TRUE) {
                 /* We have received a notification that is of interest
                    to the Java API. The appropriate notification will be
@@ -512,7 +512,7 @@ JNIEXPORT jint JNICALL Java_sun_nio_ch_sctp_SctpChannelImpl_receive0
     } while (msg->msg_flags & MSG_NOTIFICATION);
 
     handleMessage(env, resultContainerObj, msg, rv,
-            (msg->msg_flags & MSG_EOR), &sa.sa);
+           0 /* (msg->msg_flags & MSG_EOR) */, &sa.sa);
     return rv;
 }
 

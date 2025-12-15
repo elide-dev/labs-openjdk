@@ -115,7 +115,9 @@
 # include <stdint.h>
 # include <inttypes.h>
 # include <sys/ioctl.h>
+#ifndef __COSMOPOLITAN__
 # include <linux/elf-em.h>
+#endif
 # include <sys/prctl.h>
 #ifdef __GLIBC__
 # include <malloc.h>
@@ -669,6 +671,7 @@ void os::init_system_properties_values() {
 
 void os::Linux::libpthread_init() {
   // Save glibc and pthread version strings.
+#if !defined(__COSMOPOLITAN__)
 #if !defined(_CS_GNU_LIBC_VERSION) || \
     !defined(_CS_GNU_LIBPTHREAD_VERSION)
   #error "glibc too old (< 2.3.2)"
@@ -691,6 +694,10 @@ void os::Linux::libpthread_init() {
   str = (char *)malloc(n, mtInternal);
   confstr(_CS_GNU_LIBPTHREAD_VERSION, str, n);
   os::Linux::set_libpthread_version(str);
+#endif
+#else
+  os::Linux::set_libc_version("cosmo");
+  os::Linux::set_libpthread_version("cosmo");
 #endif
 }
 
@@ -1544,6 +1551,7 @@ const char* os::get_temp_directory() { return "/tmp"; }
 
 // check if addr is inside libjvm.so
 bool os::address_is_in_vm(address addr) {
+#ifndef __COSMOPOLITAN__
   static address libjvm_base_addr;
   Dl_info dlinfo;
 
@@ -1557,8 +1565,10 @@ bool os::address_is_in_vm(address addr) {
   if (dladdr((void *)addr, &dlinfo) != 0) {
     if (libjvm_base_addr == (address)dlinfo.dli_fbase) return true;
   }
-
   return false;
+#else
+  return false;
+#endif
 }
 
 void os::prepare_native_symbols() {
@@ -1569,7 +1579,7 @@ bool os::dll_address_to_function_name(address addr, char *buf,
                                       bool demangle) {
   // buf is not optional, but offset is optional
   assert(buf != nullptr, "sanity check");
-
+#ifndef __COSMOPOLITAN__
   Dl_info dlinfo;
 
   if (dladdr((void*)addr, &dlinfo) != 0) {
@@ -1593,13 +1603,16 @@ bool os::dll_address_to_function_name(address addr, char *buf,
   buf[0] = '\0';
   if (offset != nullptr) *offset = -1;
   return false;
+#else
+  return false;
+#endif
 }
 
 bool os::dll_address_to_library_name(address addr, char* buf,
                                      int buflen, int* offset) {
   // buf is not optional, but offset is optional
   assert(buf != nullptr, "sanity check");
-
+#ifndef __COSMOPOLITAN__
   Dl_info dlinfo;
   if (dladdr((void*)addr, &dlinfo) != 0) {
     if (dlinfo.dli_fname != nullptr) {
@@ -1613,6 +1626,9 @@ bool os::dll_address_to_library_name(address addr, char* buf,
   buf[0] = '\0';
   if (offset) *offset = -1;
   return false;
+#else
+  return false;
+#endif
 }
 
 // Remember the stack's state. The Linux dynamic linker will change
@@ -1641,6 +1657,7 @@ class VM_LinuxDllLoad: public VM_Operation {
 };
 
 void * os::dll_load(const char *filename, char *ebuf, int ebuflen) {
+#ifndef __COSMOPOLITAN__
   void * result = nullptr;
   bool load_attempted = false;
 
@@ -1890,6 +1907,7 @@ void * os::dll_load(const char *filename, char *ebuf, int ebuflen) {
                (int) lib_arch.elf_class * 32, arch_array[running_arch_index].elf_class * 32);
     return nullptr;
   }
+#endif
 
   return nullptr;
 }
@@ -1929,9 +1947,17 @@ void * os::Linux::dlopen_helper(const char *filename, char *ebuf, int ebuflen) {
 
   void* result;
   JFR_ONLY(NativeLibraryLoadEvent load_event(filename, &result);)
+#ifndef __COSMOPOLITAN__
   result = ::dlopen(filename, RTLD_LAZY);
+#else
+  result = nullptr;
+#endif
   if (result == nullptr) {
+#ifndef __COSMOPOLITAN__
     const char* error_report = ::dlerror();
+#else
+    const char* error_report = nullptr;
+#endif
     if (error_report == nullptr) {
       error_report = "dlerror returned no error description";
     }
@@ -2009,12 +2035,14 @@ void * os::Linux::dll_load_in_vmthread(const char *filename, char *ebuf,
 const char* os::Linux::dll_path(void* lib) {
   struct link_map *lmap;
   const char* l_path = nullptr;
+#ifndef __COSMOPOLITAN__
   assert(lib != nullptr, "dll_path parameter must not be null");
 
   int res_dli = ::dlinfo(lib, RTLD_DI_LINKMAP, &lmap);
   if (res_dli == 0) {
     l_path = lmap->l_name;
   }
+#endif
   return l_path;
 }
 
@@ -3018,7 +3046,9 @@ void os::pd_commit_memory_or_exit(char* addr, size_t size, bool exec,
   #define MAP_FIXED_NOREPLACE MAP_FIXED_NOREPLACE_value
 #else
   // Sanity-check our assumed default value if we build with a new enough libc.
+#ifndef __COSMOPOLITAN__
   STATIC_ASSERT(MAP_FIXED_NOREPLACE == MAP_FIXED_NOREPLACE_value);
+#endif
 #endif
 
 int os::Linux::commit_memory_impl(char* addr, size_t size,
@@ -3224,17 +3254,25 @@ extern "C" JNIEXPORT void numa_error(char *where) { }
 // Handle request to load libnuma symbol version 1.1 (API v1). If it fails
 // load symbol from base version instead.
 void* os::Linux::libnuma_dlsym(void* handle, const char *name) {
+#if STATIC_BUILD
+  return nullptr;
+#else
   void *f = dlvsym(handle, name, "libnuma_1.1");
   if (f == nullptr) {
     f = dlsym(handle, name);
   }
   return f;
+#endif
 }
 
 // Handle request to load libnuma symbol version 1.2 (API v2) only.
 // Return null if the symbol is not defined in this particular version.
 void* os::Linux::libnuma_v2_dlsym(void* handle, const char* name) {
+#if STATIC_BUILD
+  return nullptr;
+#else
   return dlvsym(handle, name, "libnuma_1.2");
+#endif
 }
 
 // Check numa dependent syscalls
@@ -4954,6 +4992,7 @@ void os::set_native_thread_name(const char *name) {
 // debug support
 
 bool os::find(address addr, outputStream* st) {
+#ifndef __COSMOPOLITAN__
   Dl_info dlinfo;
   memset(&dlinfo, 0, sizeof(dlinfo));
   if (dladdr(addr, &dlinfo) != 0) {
@@ -4990,6 +5029,7 @@ bool os::find(address addr, outputStream* st) {
     }
     return true;
   }
+#endif
   return false;
 }
 
