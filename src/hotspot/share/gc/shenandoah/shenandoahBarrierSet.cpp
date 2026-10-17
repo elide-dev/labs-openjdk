@@ -141,6 +141,16 @@ void ShenandoahBarrierSet::on_thread_attach(Thread *thread) {
     ShenandoahThreadLocalData::set_card_table(thread, _card_table->write_byte_map_base());
   }
   ShenandoahThreadLocalData::set_gc_state(thread, _heap->gc_state());
+#ifdef SVM
+  // Cache the heap-global collection-set fast-test map base in the per-thread GC data block so the
+  // generated load-reference barrier can read it off the thread register next to _gc_state. Only Java
+  // threads run that barrier, and the collection set only exists after heap initialization, so GC
+  // worker (NonJava) threads and the main thread's very early attach are skipped here. The main thread
+  // is initialized separately at the end of svm_gc_create once the collection set is available.
+  if (thread->is_Java_thread() && _heap->collection_set() != nullptr) {
+    ShenandoahThreadLocalData::set_cset_map(thread, ShenandoahHeap::in_cset_fast_test_addr());
+  }
+#endif // SVM
 
   if (thread->is_Java_thread()) {
     ShenandoahThreadLocalData::initialize_gclab(thread);

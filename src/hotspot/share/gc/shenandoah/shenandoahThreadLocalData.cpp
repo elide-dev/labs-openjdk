@@ -35,6 +35,10 @@ ShenandoahThreadLocalData::ShenandoahThreadLocalData() :
   _gc_state(0),
   _oom_scope_nesting_level(0),
   _oom_during_evac(false),
+#ifdef SVM
+  _tlab(),
+  _cset_map(nullptr),
+#endif // SVM
   _satb_mark_queue(&ShenandoahBarrierSet::satb_mark_queue_set()),
   _card_table(nullptr),
   _gclab(nullptr),

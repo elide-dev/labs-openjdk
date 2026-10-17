@@ -49,6 +49,17 @@ private:
   // Evacuation OOM state
   uint8_t                 _oom_scope_nesting_level;
   bool                    _oom_during_evac;
+#ifdef SVM
+  // SVM-only hot fields, grouped so the generated allocation and barrier code reads them at small,
+  // single-cache-line offsets from the thread register. The _oom_* bytes above intentionally fill
+  // _gc_state's alignment gap.
+  SVMThreadLocalAllocBufferData _tlab;
+  // Heap-global, biased base of the collection-set fast-test byte map. On HotSpot this is the single
+  // global ShenandoahHeap::in_cset_fast_test_addr(); SVM caches it per thread so the load-reference
+  // barrier can read it off the thread register right next to _gc_state, instead of from a separate
+  // thread local.
+  address                 _cset_map;
+#endif // SVM
 
   SATBMarkQueue           _satb_mark_queue;
 
@@ -96,16 +107,28 @@ private:
   }
 
   static ByteSize satb_mark_queue_offset() {
+#ifdef SVM
+    return byte_offset_of(ShenandoahThreadLocalData, _satb_mark_queue);
+#else
     return Thread::gc_data_offset() + byte_offset_of(ShenandoahThreadLocalData, _satb_mark_queue);
+#endif // SVM
   }
 
 public:
   static void create(Thread* thread) {
+#ifdef SVM
+    ShenandoahThreadLocalData* thread_data = new (data(thread)) ShenandoahThreadLocalData();
+    thread->tlab().set_allocation_data(&thread_data->_tlab);
+#else
     new (data(thread)) ShenandoahThreadLocalData();
+#endif // SVM
   }
 
   static void destroy(Thread* thread) {
     data(thread)->~ShenandoahThreadLocalData();
+#ifdef SVM
+    thread->tlab().set_allocation_data(nullptr);
+#endif // SVM
   }
 
   static SATBMarkQueue& satb_mark_queue(Thread* thread) {
@@ -290,12 +313,42 @@ public:
   }
 
   static ByteSize gc_state_offset() {
+#ifdef SVM
+    return byte_offset_of(ShenandoahThreadLocalData, _gc_state);
+#else
     return Thread::gc_data_offset() + byte_offset_of(ShenandoahThreadLocalData, _gc_state);
+#endif // SVM
   }
 
   static ByteSize card_table_offset() {
+#ifdef SVM
+    return byte_offset_of(ShenandoahThreadLocalData, _card_table);
+#else
     return Thread::gc_data_offset() + byte_offset_of(ShenandoahThreadLocalData, _card_table);
+#endif // SVM
   }
+
+#ifdef SVM
+  static ByteSize tlab_top_offset() {
+    return byte_offset_of(ShenandoahThreadLocalData, _tlab) + SVMThreadLocalAllocBufferData::top_offset();
+  }
+
+  static ByteSize tlab_end_offset() {
+    return byte_offset_of(ShenandoahThreadLocalData, _tlab) + SVMThreadLocalAllocBufferData::end_offset();
+  }
+
+  static void set_cset_map(Thread* thread, address cset_map) {
+    data(thread)->_cset_map = cset_map;
+  }
+
+  static address cset_map(Thread* thread) {
+    return data(thread)->_cset_map;
+  }
+
+  static ByteSize cset_map_offset() {
+    return byte_offset_of(ShenandoahThreadLocalData, _cset_map);
+  }
+#endif // SVM
 };
 
 STATIC_ASSERT(sizeof(ShenandoahThreadLocalData) <= sizeof(GCThreadLocalData));
