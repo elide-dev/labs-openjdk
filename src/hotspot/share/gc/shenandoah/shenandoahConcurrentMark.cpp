@@ -45,6 +45,10 @@
 #include "runtime/continuation.hpp"
 #include "runtime/threads.hpp"
 
+#ifdef SVM
+#include "gc/shenandoah/shenandoahRuntimeCode.hpp"
+#endif
+
 namespace svm_gc {
 
 template <ShenandoahGenerationType GENERATION>
@@ -89,6 +93,46 @@ public:
     _satb_qset.flush_queue(ShenandoahThreadLocalData::satb_mark_queue(thread));
   }
 };
+
+#ifdef SVM
+template <ShenandoahGenerationType GENERATION>
+class ShenandoahRemarkCodeTask : public WorkerTask {
+  ShenandoahConcurrentMark* _cm;
+  TaskTerminator _terminator;
+ public:
+  ShenandoahRemarkCodeTask(ShenandoahConcurrentMark* cm, uint nworkers) :
+    WorkerTask("Shenandoah SVM Remark Code"), _cm(cm), _terminator(nworkers, cm->task_queues()) {}
+  void work(uint worker_id) override {
+    ShenandoahParallelWorkerSession session(worker_id);
+    ShenandoahHeap* heap = ShenandoahHeap::heap();
+    ShenandoahReferenceProcessor* rp = heap->gc_generation()->ref_processor();
+    ShenandoahMarkRefsClosure<GENERATION> mark(_cm->get_queue(worker_id), rp, _cm->get_old_queue(worker_id));
+    ShenandoahCodeIsAliveClosure is_alive;
+    ShenandoahRuntimeCode::mark(&mark, GENERATION == YOUNG ? nullptr : &is_alive, true);
+    StringDedup::Requests requests;
+    _cm->mark_loop(worker_id, &_terminator, rp, GENERATION, false, NO_DEDUP, &requests);
+  }
+};
+#endif // SVM
+
+#ifdef SVM
+template <ShenandoahGenerationType GENERATION>
+class ShenandoahRemarkThreadRootsTask : public WorkerTask {
+  ShenandoahConcurrentMark* _cm;
+  ShenandoahThreadRoots _thread_roots;
+ public:
+  ShenandoahRemarkThreadRootsTask(ShenandoahConcurrentMark* cm) :
+    WorkerTask("Shenandoah SVM Remark Active Code"), _cm(cm),
+    _thread_roots(ShenandoahPhaseTimings::finish_mark, true) {}
+  void work(uint worker_id) override {
+    ShenandoahParallelWorkerSession session(worker_id);
+    ShenandoahReferenceProcessor* rp = ShenandoahHeap::heap()->gc_generation()->ref_processor();
+    ShenandoahMarkRefsClosure<GENERATION> mark(_cm->get_queue(worker_id), rp, _cm->get_old_queue(worker_id));
+    MarkingNMethodClosure code(&mark, !NMethodToOopClosure::FixRelocations, true);
+    _thread_roots.oops_do(&mark, &code, worker_id);
+  }
+};
+#endif // SVM
 
 template <ShenandoahGenerationType GENERATION>
 class ShenandoahFinalMarkingTask : public WorkerTask {
@@ -197,6 +241,7 @@ void ShenandoahConcurrentMark::mark_concurrent_roots() {
   WorkerThreads* workers = heap->workers();
   ShenandoahReferenceProcessor* rp = _generation->ref_processor();
   _generation->reserve_task_queues(workers->active_workers());
+  SVM_ONLY(NMethodMarkScope code_scope;)
   switch (_generation->type()) {
     case YOUNG: {
       ShenandoahMarkConcurrentRootsTask<YOUNG> task(task_queues(), old_task_queues(), rp,
@@ -313,34 +358,60 @@ void ShenandoahConcurrentMark::finish_mark_work() {
   uint nworkers = heap->workers()->active_workers();
   task_queues()->reserve(nworkers);
 
-  StrongRootsScope scope(nworkers);
-  TaskTerminator terminator(nworkers, task_queues());
-
-  switch (_generation->type()) {
-    case YOUNG:{
-      ShenandoahFinalMarkingTask<YOUNG> task(this, &terminator, ShenandoahStringDedup::is_enabled());
-      heap->workers()->run_task(&task);
-      break;
+#ifdef SVM
+  if (SVMGlobalData::_clean_runtime_code_cache != nullptr) {
+    NMethodMarkScope scope;
+    switch (_generation->type()) {
+      case YOUNG: { ShenandoahRemarkThreadRootsTask<YOUNG> task(this); heap->workers()->run_task(&task); break; }
+      case OLD: { ShenandoahRemarkThreadRootsTask<OLD> task(this); heap->workers()->run_task(&task); break; }
+      case GLOBAL: { ShenandoahRemarkThreadRootsTask<GLOBAL> task(this); heap->workers()->run_task(&task); break; }
+      case NON_GEN: { ShenandoahRemarkThreadRootsTask<NON_GEN> task(this); heap->workers()->run_task(&task); break; }
+      default: ShouldNotReachHere();
     }
-    case OLD:{
-      ShenandoahFinalMarkingTask<OLD> task(this, &terminator, ShenandoahStringDedup::is_enabled());
-      heap->workers()->run_task(&task);
-      break;
-    }
-    case GLOBAL:{
-      ShenandoahFinalMarkingTask<GLOBAL> task(this, &terminator, ShenandoahStringDedup::is_enabled());
-      heap->workers()->run_task(&task);
-      break;
-    }
-    case NON_GEN:{
-      ShenandoahFinalMarkingTask<NON_GEN> task(this, &terminator, ShenandoahStringDedup::is_enabled());
-      heap->workers()->run_task(&task);
-      break;
-    }
-    default:
-      ShouldNotReachHere();
   }
+#endif
 
+  {
+    StrongRootsScope scope(nworkers);
+    TaskTerminator terminator(nworkers, task_queues());
+
+    switch (_generation->type()) {
+      case YOUNG:{
+        ShenandoahFinalMarkingTask<YOUNG> task(this, &terminator, ShenandoahStringDedup::is_enabled());
+        heap->workers()->run_task(&task);
+        break;
+      }
+      case OLD:{
+        ShenandoahFinalMarkingTask<OLD> task(this, &terminator, ShenandoahStringDedup::is_enabled());
+        heap->workers()->run_task(&task);
+        break;
+      }
+      case GLOBAL:{
+        ShenandoahFinalMarkingTask<GLOBAL> task(this, &terminator, ShenandoahStringDedup::is_enabled());
+        heap->workers()->run_task(&task);
+        break;
+      }
+      case NON_GEN:{
+        ShenandoahFinalMarkingTask<NON_GEN> task(this, &terminator, ShenandoahStringDedup::is_enabled());
+        heap->workers()->run_task(&task);
+        break;
+      }
+      default:
+        ShouldNotReachHere();
+    }
+  }
+#ifdef SVM
+  if (SVMGlobalData::_clean_runtime_code_cache != nullptr) {
+    NMethodMarkScope scope;
+    switch (_generation->type()) {
+      case YOUNG: { ShenandoahRemarkCodeTask<YOUNG> task(this, nworkers); heap->workers()->run_task(&task); break; }
+      case OLD: { ShenandoahRemarkCodeTask<OLD> task(this, nworkers); heap->workers()->run_task(&task); break; }
+      case GLOBAL: { ShenandoahRemarkCodeTask<GLOBAL> task(this, nworkers); heap->workers()->run_task(&task); break; }
+      case NON_GEN: { ShenandoahRemarkCodeTask<NON_GEN> task(this, nworkers); heap->workers()->run_task(&task); break; }
+      default: ShouldNotReachHere();
+    }
+  }
+#endif
 
   assert(task_queues()->is_empty(), "Should be empty");
 }

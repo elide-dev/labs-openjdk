@@ -26,32 +26,59 @@
 #ifndef SVM_SHARE_GC_SHENANDOAH_SHENANDOAHMETASPACE_HPP
 #define SVM_SHARE_GC_SHENANDOAH_SHENANDOAHMETASPACE_HPP
 
+#include "oops/oop.hpp"
 #include "svmMetaspace.hpp"
+
 
 namespace svm_gc {
 
-// Minimal metaspace for Shenandoah.
-//
-// Runtime class loading (and therefore an actually populated metaspace) is not supported for
-// Shenandoah yet: the Native Image side only registers a Metaspace when RuntimeClassLoading is
-// enabled, and in that case the reserved metaspace size that the collector receives is 0. This class
-// exists only to satisfy the shared CollectedHeap interface, which (unlike before the G1 metaspace
-// merge) requires every collector to register an SVMMetaspace. It reports a permanently empty
-// metaspace. If/when runtime class loading is brought to Shenandoah, this needs a real
-// implementation analogous to G1Metaspace.
+class InstanceKlass;
+class Klass;
+
+// Permanent, non-moving runtime metadata in a bounded prefix of the heap reservation.
+// Allocation initializes the complete object before release-publishing the region top.
+// Root scanning acquires that top and traces outgoing references. Reference referents
+// remain subject to normal weak-reference processing. Class unloading is not supported.
 class ShenandoahMetaspace : public SVMMetaspace {
+ public:
+  enum AllocationKind {
+    DynamicHubAllocation = 0,
+    ByteArrayAllocation = 1,
+    IntArrayAllocation = 2,
+    ObjectAllocation = 3,
+    AllocationKindCount = 4
+  };
+
  private:
+  static uint _current_region;
+  static uint _committed_regions;
   static size_t _used;
   static size_t _used_at_last_gc;
+  static size_t _allocation_counts[AllocationKindCount];
+  static size_t _allocation_sizes[AllocationKindCount];
+
+  static oop allocate(Klass* klass, size_t word_size, int array_length, AllocationKind allocation_kind);
+  static oop allocate_humongous(Klass* klass, size_t word_size, int array_length, AllocationKind allocation_kind);
+  static oop initialize_object(HeapWord* memory, Klass* klass, size_t word_size, int array_length);
+  static void record_allocation(size_t word_size, AllocationKind allocation_kind);
+  static void commit_regions(uint end_region);
 
  public:
   void initialize();
   void update_used_at_last_gc() override;
+
+  static oop allocate_instance(InstanceKlass* klass);
+  static oop allocate_array(Klass* klass, int length, AllocationKind allocation_kind);
+
   bool is_in_allocated_memory(const void* address) const override;
 
   static size_t used() { return _used; }
   static size_t used_at_last_gc() { return _used_at_last_gc; }
+  static size_t waste();
+  static size_t allocation_count(AllocationKind allocation_kind) { return _allocation_counts[allocation_kind]; }
+  static size_t allocation_size(AllocationKind allocation_kind) { return _allocation_sizes[allocation_kind]; }
 };
+
 
 } // namespace svm_gc
 

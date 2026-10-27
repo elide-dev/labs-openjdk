@@ -166,7 +166,11 @@ void ShenandoahSTWRootScanner::roots_do(T* oops, uint worker_id) {
     _cld_roots.always_strong_cld_do(&clds, worker_id);
 #endif // !SVM
   } else {
+#ifdef SVM
+    _thread_roots.oops_do(oops, &nmethods_cl, worker_id);
+#else
     _thread_roots.oops_do(oops, nullptr, worker_id);
+#endif
 #ifndef SVM
     _code_roots.nmethods_do(&nmethods_cl, worker_id);
     _cld_roots.cld_do(&clds, worker_id);
@@ -200,6 +204,10 @@ void ShenandoahRootUpdater::roots_do(uint worker_id, IsAlive* is_alive, KeepAliv
   // Process heavy-weight/fully parallel roots the last
   _code_roots.nmethods_do(codes_cl, worker_id);
 #else
+  if (worker_id == 0) {
+    NMethodToOopClosure code(keep_alive, NMethodToOopClosure::FixRelocations);
+    CodeCache::nmethods_do(&code);
+  }
   _open_image_heap_roots.oops_do(keep_alive, worker_id);
 #endif // !SVM
   _thread_roots.oops_do(keep_alive, nullptr, worker_id);

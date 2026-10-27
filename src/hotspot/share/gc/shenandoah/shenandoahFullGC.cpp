@@ -67,6 +67,10 @@
 #include "utilities/events.hpp"
 #include "utilities/growableArray.hpp"
 
+#ifdef SVM
+#include "gc/shenandoah/shenandoahRuntimeCode.hpp"
+#endif
+
 namespace svm_gc {
 
 ShenandoahFullGC::ShenandoahFullGC() :
@@ -283,6 +287,13 @@ void ShenandoahFullGC::do_it(GCCause::Cause gc_cause) {
   if (ShenandoahVerify) {
     heap->verifier()->verify_after_fullgc();
   }
+
+#ifdef SVM
+  if (SVMGlobalData::_clean_runtime_code_cache != nullptr) {
+    // Invalidation calls Java and must follow relocation of all live references.
+    ShenandoahRuntimeCode::clean();
+  }
+#endif
 
   if (VerifyAfterGC) {
     Universe::verify();
@@ -778,7 +789,7 @@ private:
       oop obj = CompressedOops::decode_not_null(o);
 #ifdef SVM
       // SVM-TODO: do we need this, because objects in the image heap are never moved, but they should also not be marked?
-      if (SVMImageHeap::is_image_heap_object(obj)) return;
+      if (SVMImageHeap::is_image_heap_or_metaspace_object(obj)) return;
 #endif
       assert(_ctx->is_marked(obj), "must be marked");
       if (FullGCForwarding::is_forwarded(obj)) {
@@ -831,7 +842,7 @@ public:
     ShenandoahHeapRegion* r = _regions.next();
     while (r != nullptr) {
 #ifdef SVM
-      if (r->is_image_heap()) {
+      if (r->is_image_heap_or_metaspace()) {
         r = _regions.next();
         continue;
       }

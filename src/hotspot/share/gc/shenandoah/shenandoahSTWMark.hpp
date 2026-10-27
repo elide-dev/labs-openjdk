@@ -46,6 +46,7 @@ public:
 
 private:
   void mark_roots(uint worker_id);
+  SVM_ONLY(void mark_code_roots(uint worker_id);)
   void finish_mark(uint worker_id);
 };
 

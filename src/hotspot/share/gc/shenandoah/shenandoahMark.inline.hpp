@@ -304,7 +304,7 @@ inline void ShenandoahMark::mark_through_ref(T *p, ShenandoahObjToScanQueue* q, 
 #ifdef SVM
     // We don't mark in the image heap: its objects are always live, are never moved, and their
     // regions carry no generation affiliation.
-    if (SVMImageHeap::is_image_heap_object(obj)) return;
+    if (SVMImageHeap::is_image_heap_or_metaspace_object(obj)) return;
 #endif // SVM
 
     ShenandoahGenerationalHeap* heap = ShenandoahGenerationalHeap::heap();
@@ -353,7 +353,7 @@ inline void ShenandoahMark::mark_non_generational_ref(T* p, ShenandoahObjToScanQ
 
 #ifdef SVM
   // We don't mark in the image heap.
-  if (SVMImageHeap::is_image_heap_object(obj)) return;
+  if (SVMImageHeap::is_image_heap_or_metaspace_object(obj)) return;
 #endif
 
     shenandoah_assert_not_forwarded(p, obj);
