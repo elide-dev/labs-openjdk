@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Substrate VM G1 Garbage Collector Sources
 
 This branch is based on the LabsJDK CE tag `jvmci-25.2-b20` and contains the
@@ -158,8 +157,8 @@ In general, we keep the diff against OpenJDK small because large diffs make JDK 
 
 This code is licensed under the GNU General Public License version 2. Some
 files are subject to the Classpath exception, as stated in their headers.
-=======
-# Overview
+
+# Shenandoah and Shared GC Infrastructure
 
 This branch was originally based on the tag `25+37-jvmci-b04` of this repository and contains infrastructure that simplifies the integration of HotSpot garbage collectors into Native Image. The Shenandoah sources have meanwhile been updated on the HotSpot version on the tag `jdk-25.0.4+6`.
 
@@ -167,8 +166,8 @@ This branch was originally based on the tag `25+37-jvmci-b04` of this repository
 
 The current implementation has a few limitations:
 
-- Only `linux/amd64` and `linux/aarch64` are supported at the moment.
-  macOS and Windows support should be easy to add but the build system needs to be changed for that.
+- Shenandoah is supported on `linux/amd64`, `linux/aarch64`, and `darwin/aarch64`.
+  Windows is not supported.
 - Only a **single** Native Image isolate is supported at the moment because the C++ code has process-wide global state.
 
 ## Structure
@@ -327,4 +326,3 @@ This branch was originally based on `25+37-jvmci-b04` but the existing Shenandoa
 ```shell
 git checkout jdk-25.0.4+6 -- src/hotspot/share/gc/shenandoah/shenandoahHeapRegion.hpp
 ```
->>>>>>> simonis/GR-70066
