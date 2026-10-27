@@ -56,6 +56,10 @@
 #include "runtime/vmThread.hpp"
 #include "utilities/events.hpp"
 
+#ifdef SVM
+#include "gc/shenandoah/shenandoahRuntimeCode.hpp"
+#endif
+
 namespace svm_gc {
 
 // Breakpoint support
@@ -830,6 +834,12 @@ public:
     ShenandoahEvacOOMScope oom_scope;
     ShenandoahEvacuateUpdateMetadataClosure cl;
     _thread_roots.oops_do(&cl, nullptr, worker_id);
+    if (worker_id == 0) {
+      // Embedded constants have no load-reference barrier. Canonicalize every
+      // code root while mutators are stopped, before concurrent evacuation.
+      NMethodToOopClosure code(&cl, NMethodToOopClosure::FixRelocations);
+      CodeCache::nmethods_do(&code);
+    }
   }
 };
 #endif // SVM
@@ -845,6 +855,11 @@ void ShenandoahConcurrentGC::op_final_mark() {
 
   if (!heap->cancelled_gc()) {
     _mark.finish_mark();
+#ifdef SVM
+    if (SVMGlobalData::_clean_runtime_code_cache != nullptr) {
+      ShenandoahRuntimeCode::clean();
+    }
+#endif
     assert(!heap->cancelled_gc(), "STW mark cannot OOM");
 
     // Notify JVMTI that the tagmap table will need cleaning.

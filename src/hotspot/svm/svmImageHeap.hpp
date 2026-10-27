@@ -33,6 +33,12 @@ namespace svm_gc {
 
 class SVMImageHeap : public AllStatic {
 public:
+  static inline bool is_image_heap_or_metaspace_object(oop object) {
+    char* address = cast_from_oop<char*>(object);
+    return is_image_heap_object(object) ||
+           (address >= SVMIsolateData::_metaspace_start_addr && address < SVMIsolateData::_metaspace_end_addr);
+  }
+
   static inline bool is_image_heap_object(oop object) {
     return is_in_image_heap(cast_from_oop<HeapWord*>(object));
   }

@@ -35,6 +35,10 @@
 #include "prims/jvmtiTagMap.hpp"
 #include "utilities/events.hpp"
 
+#ifdef SVM
+#include "gc/shenandoah/shenandoahRuntimeCode.hpp"
+#endif
+
 namespace svm_gc {
 
 
@@ -57,6 +61,11 @@ void ShenandoahOldGC::op_final_mark() {
   if (!heap->cancelled_gc()) {
     assert(_mark.generation()->is_old(), "Generation of Old-Gen GC should be OLD");
     _mark.finish_mark();
+#ifdef SVM
+    if (SVMGlobalData::_clean_runtime_code_cache != nullptr) {
+      ShenandoahRuntimeCode::clean();
+    }
+#endif
     assert(!heap->cancelled_gc(), "STW mark cannot OOM");
 
     // Old collection is complete, the young generation no longer needs this

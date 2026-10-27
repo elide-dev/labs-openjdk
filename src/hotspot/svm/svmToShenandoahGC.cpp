@@ -92,13 +92,34 @@ static inline jlong convert_size_t_to_jlong(size_t val) {
   LP64_ONLY(return (jlong)MIN2(val, (size_t)max_jlong);)
 }
 
+class ShenandoahCodeRegistrationClosure : public OopClosure {
+  template <class T> void work(T* p) {
+    T raw = RawAccess<>::oop_load(p);
+    oop obj = CompressedOops::decode(raw);
+    if (obj == nullptr) return;
+    ShenandoahHeap* heap = ShenandoahHeap::heap();
+    ShenandoahBarrierSet* bs = ShenandoahBarrierSet::barrier_set();
+    if (heap->has_forwarded_objects()) {
+      obj = bs->load_reference_barrier(ON_STRONG_OOP_REF, obj, p);
+      RawAccess<>::oop_store(p, obj);
+    }
+    if (heap->is_concurrent_mark_in_progress() && !SVMImageHeap::is_image_heap_or_metaspace_object(obj)) {
+      // New code must retain its references in the current SATB snapshot.
+      bs->enqueue(obj);
+    }
+  }
+ public:
+  void do_oop(oop* p) override { work(p); }
+  void do_oop(narrowOop* p) override { work(p); }
+};
+
 extern "C" {
 // NO_TRANSITION - This method is called during startup, before anything else is initialized.
 EXPORT_FOR_SVM void svm_gc_parse_options(int actual_native_image_version, int argc, char *argv[], char *image_build_hosted_args, char *image_build_runtime_args,
     size_t max_heap_address_space_size, size_t heap_base_alignment, size_t null_regions_size, size_t metaspace_size, size_t image_heap_size,
     int compressed_reference_shift, bool is_containerized, jlong container_memory_limit_in_bytes, int container_active_processor_count, ShenandoahHeapOptions *result) {
   // verify invariants
-  int expected_native_image_version = 250501;
+  int expected_native_image_version = 250502;
   guarantee(actual_native_image_version >= expected_native_image_version, "incompatible GC version: the native-image tries to use a GC that is too new");
   guarantee(actual_native_image_version <= expected_native_image_version, "incompatible GC version: the native-image tries to use a GC that is too old");
 #ifdef SVM_COMPRESSED_REFERENCES
@@ -134,6 +155,9 @@ EXPORT_FOR_SVM void svm_gc_parse_options(int actual_native_image_version, int ar
   SVMGlobalData::_container_active_processor_count = container_active_processor_count;
 
   Threads::parse_arguments();
+
+  guarantee(metaspace_size % ShenandoahHeapRegion::region_size_bytes() == 0, "must be region-aligned");
+  SVMGlobalData::_metaspace_regions = (int)(metaspace_size / ShenandoahHeapRegion::region_size_bytes());
 
   assert(is_aligned(MaxHeapSize, HeapAlignment), "must be");
   result->max_heap_size = MaxHeapSize;
@@ -286,10 +310,7 @@ EXPORT_FOR_SVM ShenandoahInitState* svm_gc_create(IsolateThread *isolate_thread,
   }
 
   CompressedOops::initialize();
-  // Register a (minimal, empty) metaspace so the shared CollectedHeap code that unconditionally
-  // queries SVMMetaspace::metaspace() has a valid instance. Runtime class loading is not supported
-  // for Shenandoah yet, so this metaspace is always empty. Must happen before Threads::create_vm,
-  // which runs universe_post_init -> CollectedHeap::update_capacity_and_used_at_gc.
+  // Register metaspace before shared heap initialization first queries it.
   static ShenandoahMetaspace shenandoah_metaspace;
   shenandoah_metaspace.initialize();
   jint result = Threads::create_vm(isolate_thread);
@@ -781,7 +802,8 @@ EXPORT_FOR_SVM void svm_gc_register_object_fields(nmethod* nm) {
   assert(IsolateThread::current()->has_status_java(), "unexpected thread state");
   assert(nm->state() == nmethod::state_code_constants_live, "must be");
 
-  Unimplemented();
+  ShenandoahCodeRegistrationClosure cl;
+  nm->oops_do_object_fields(&cl);
 }
 
 // NO_TRANSITION - Almost uninterruptible code that may be called from any Java thread.
@@ -789,7 +811,8 @@ EXPORT_FOR_SVM void svm_gc_register_code_constants(nmethod* nm) {
   assert(IsolateThread::current()->has_status_java(), "unexpected thread state");
   assert(nm->state() == nmethod::state_code_constants_live, "must be");
 
-  Unimplemented();
+  ShenandoahCodeRegistrationClosure cl;
+  nm->oops_do_code_constants(&cl);
 }
 
 // NO_TRANSITION - Almost uninterruptible code that may be called from any Java thread.
@@ -797,7 +820,8 @@ EXPORT_FOR_SVM void svm_gc_register_frame_metadata(nmethod* nm) {
   assert(IsolateThread::current()->has_status_java(), "unexpected thread state");
   assert(nm->state() == nmethod::state_code_constants_live, "must be");
 
-  Unimplemented();
+  ShenandoahCodeRegistrationClosure cl;
+  nm->oops_do_frame_metadata(&cl);
 }
 
 // NO_TRANSITION - Almost uninterruptible code that may be called from any Java thread.
@@ -805,7 +829,8 @@ EXPORT_FOR_SVM void svm_gc_register_deopt_metadata(nmethod* nm) {
   assert(IsolateThread::current()->has_status_java(), "unexpected thread state");
   assert(nm->state() == nmethod::state_code_constants_live, "must be");
 
-  Unimplemented();
+  ShenandoahCodeRegistrationClosure cl;
+  nm->oops_do_deopt_metadata(&cl);
 }
 
 // NO_TRANSITION - Only called when printing diagnostics.
@@ -857,8 +882,8 @@ EXPORT_FOR_SVM jlong svm_gc_get_used_memory() {
   assert(IsolateThread::current()->has_status_vm(), "unexpected thread state");
   MutexLocker x(Heap_lock);
   size_t n = Universe::heap()->used();
-  assert(n >= SVMGlobalData::_image_heap_used, "must be");
-  return convert_size_t_to_jlong(n - SVMGlobalData::_image_heap_used);
+  // Shenandoah generation usage counts only the collected Java regions.
+  return convert_size_t_to_jlong(n);
 }
 
 // TO_VM - May be called by any Java thread. May block.
@@ -868,7 +893,11 @@ EXPORT_FOR_SVM jlong svm_gc_get_free_memory() {
   size_t n;
   {
      MutexLocker x(Heap_lock);
-     n = ch->capacity() - ch->used() - SVMGlobalData::_image_heap_waste;
+     size_t java_capacity = ch->capacity() - SVMGlobalData::_image_heap_size - SVMGlobalData::_metaspace_size;
+     size_t java_used = ch->used();
+     // Shenandoah updates usage independently of Heap_lock. A racing observation
+     // may underestimate capacity; never turn that into unsigned free-space overflow.
+     n = java_used < java_capacity ? java_capacity - java_used : 0;
   }
   return convert_size_t_to_jlong(n);
 }
@@ -877,25 +906,57 @@ EXPORT_FOR_SVM jlong svm_gc_get_free_memory() {
 EXPORT_FOR_SVM jlong svm_gc_get_total_memory() {
   assert(IsolateThread::current()->has_status_java(), "unexpected thread state");
   size_t n = Universe::heap()->capacity();
-  assert(n >= SVMGlobalData::_image_heap_size, "must be");
-  return convert_size_t_to_jlong(n - SVMGlobalData::_image_heap_size);
+  assert(n >= SVMGlobalData::_image_heap_size + SVMGlobalData::_metaspace_size, "must be");
+  return convert_size_t_to_jlong(n - SVMGlobalData::_image_heap_size - SVMGlobalData::_metaspace_size);
 }
 
 // NO_TRANSITION - Uninterruptible code that may be called by any Java thread.
 EXPORT_FOR_SVM jlong svm_gc_get_max_memory() {
   assert(IsolateThread::current()->has_status_java(), "unexpected thread state");
   size_t n = Universe::heap()->max_capacity();
-  assert(n >= SVMGlobalData::_image_heap_size, "must be");
-  return convert_size_t_to_jlong(n - SVMGlobalData::_image_heap_size);
+  assert(n >= SVMGlobalData::_image_heap_size + SVMGlobalData::_metaspace_size, "must be");
+  return convert_size_t_to_jlong(n - SVMGlobalData::_image_heap_size - SVMGlobalData::_metaspace_size);
 }
 
 // NO_TRANSITION - Can be called by any thread.
 EXPORT_FOR_SVM size_t svm_gc_get_used_memory_after_last_gc() {
   assert(IsolateThread::current()->has_status_java(), "unexpected thread state");
   size_t n = Universe::heap()->used_at_last_gc();
-  assert(n >= SVMGlobalData::_image_heap_used, "must be");
-  return convert_size_t_to_jlong(n - SVMGlobalData::_image_heap_used);
+  // Shenandoah generation usage counts only the collected Java regions.
+  return convert_size_t_to_jlong(n);
 }
+
+EXPORT_FOR_SVM oop svm_gc_allocate_metaspace_instance(InstanceKlass *k) {
+  assert(IsolateThread::current()->has_status_vm(), "unexpected thread state");
+  return ShenandoahMetaspace::allocate_instance(k);
+}
+
+// TO_VM - May be called by any Java thread. Uses oops. May block.
+EXPORT_FOR_SVM oop svm_gc_allocate_metaspace_array(Klass *k, int length, int allocation_kind) {
+  assert(IsolateThread::current()->has_status_vm(), "unexpected thread state");
+  guarantee(allocation_kind >= ShenandoahMetaspace::DynamicHubAllocation && allocation_kind <= ShenandoahMetaspace::IntArrayAllocation, "invalid allocation kind");
+  return ShenandoahMetaspace::allocate_array(k, length, static_cast<ShenandoahMetaspace::AllocationKind>(allocation_kind));
+}
+
+// NO_TRANSITION - Uninterruptible code that may be called by any Java thread.
+EXPORT_FOR_SVM bool svm_gc_is_in_allocated_metaspace(void *address) {
+  assert(IsolateThread::current()->has_status_java(), "unexpected thread state");
+  return SVMMetaspace::metaspace()->is_in_allocated_memory(address);
+}
+
+
+EXPORT_FOR_SVM void svm_gc_get_metaspace_statistics(MetaspaceStatistics *statistics) {
+  assert(IsolateThread::current()->has_status_java(), "unexpected thread state");
+  statistics->dynamic_hub_count = ShenandoahMetaspace::allocation_count(ShenandoahMetaspace::DynamicHubAllocation);
+  statistics->dynamic_hub_size = ShenandoahMetaspace::allocation_size(ShenandoahMetaspace::DynamicHubAllocation);
+  statistics->byte_array_count = ShenandoahMetaspace::allocation_count(ShenandoahMetaspace::ByteArrayAllocation);
+  statistics->byte_array_size = ShenandoahMetaspace::allocation_size(ShenandoahMetaspace::ByteArrayAllocation);
+  statistics->int_array_count = ShenandoahMetaspace::allocation_count(ShenandoahMetaspace::IntArrayAllocation);
+  statistics->int_array_size = ShenandoahMetaspace::allocation_size(ShenandoahMetaspace::IntArrayAllocation);
+  statistics->object_count = ShenandoahMetaspace::allocation_count(ShenandoahMetaspace::ObjectAllocation);
+  statistics->object_size = ShenandoahMetaspace::allocation_size(ShenandoahMetaspace::ObjectAllocation);
+}
+
 
 } // extern C
 

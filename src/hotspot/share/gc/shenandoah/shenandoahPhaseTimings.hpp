@@ -77,8 +77,8 @@ class outputStream;
   f(final_mark,                                     "Pause Final Mark (N)")            \
   f(final_mark_verify,                              "  Verify")                        \
   f(finish_mark,                                    "  Finish Mark")                   \
-  f(final_mark_propagate_gc_state,                  "  Propagate GC State")            \
   SHENANDOAH_PAR_PHASE_DO(finish_mark_,             "    FM: ", f)                     \
+  f(final_mark_propagate_gc_state,                  "  Propagate GC State")            \
   f(purge,                                          "  System Purge")                  \
   SHENANDOAH_PAR_PHASE_DO(purge_cu_par_,            "      CU: ", f)                   \
   f(purge_weak_par,                                 "    Weak Roots")                  \

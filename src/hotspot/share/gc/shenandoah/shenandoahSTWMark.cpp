@@ -26,6 +26,9 @@
 
 
 #include "gc/shared/strongRootsScope.hpp"
+#ifdef SVM
+#include "gc/shenandoah/shenandoahRuntimeCode.hpp"
+#endif
 #include "gc/shared/taskTerminator.hpp"
 #include "gc/shared/workerThread.hpp"
 #include "gc/shenandoah/shenandoahClosures.inline.hpp"
@@ -42,20 +45,28 @@ namespace svm_gc {
 class ShenandoahSTWMarkTask : public WorkerTask {
 private:
   ShenandoahSTWMark* const _mark;
+  bool _code_cache;
 
 public:
-  ShenandoahSTWMarkTask(ShenandoahSTWMark* mark);
+  ShenandoahSTWMarkTask(ShenandoahSTWMark* mark, bool code_cache = false);
   void work(uint worker_id);
 };
 
-ShenandoahSTWMarkTask::ShenandoahSTWMarkTask(ShenandoahSTWMark* mark) :
+ShenandoahSTWMarkTask::ShenandoahSTWMarkTask(ShenandoahSTWMark* mark, bool code_cache) :
   WorkerTask("Shenandoah STW mark"),
-  _mark(mark) {
+  _mark(mark), _code_cache(code_cache) {
 }
 
 void ShenandoahSTWMarkTask::work(uint worker_id) {
   ShenandoahParallelWorkerSession worker_session(worker_id);
-  _mark->mark_roots(worker_id);
+#ifdef SVM
+  if (_code_cache) {
+    _mark->mark_code_roots(worker_id);
+  } else
+#endif
+  {
+    _mark->mark_roots(worker_id);
+  }
   _mark->finish_mark(worker_id);
 }
 
@@ -110,6 +121,17 @@ void ShenandoahSTWMark::mark() {
     assert(task_queues()->is_empty(), "Should be empty");
   }
 
+#ifdef SVM
+  if (SVMGlobalData::_clean_runtime_code_cache != nullptr) {
+    // Tethers on active stacks were traced by the first marking task. Decide the
+    // lifetime of other code only after strong marking, then drain its references.
+    NMethodMarkScope scope;
+    _terminator.reset_for_reuse(nworkers);
+    ShenandoahSTWMarkTask task(this, true);
+    heap->workers()->run_task(&task);
+  }
+#endif
+
   _generation->set_mark_complete();
   end_mark();
 
@@ -151,10 +173,39 @@ void ShenandoahSTWMark::mark_roots(uint worker_id) {
   }
 }
 
+#ifdef SVM
+void ShenandoahSTWMark::mark_code_roots(uint worker_id) {
+  auto queue = task_queues()->queue(worker_id);
+  ShenandoahReferenceProcessor* rp = _generation->ref_processor();
+  ShenandoahCodeIsAliveClosure is_alive;
+  switch (_generation->type()) {
+    case NON_GEN: {
+      ShenandoahMarkRefsClosure<NON_GEN> mark(queue, rp, nullptr);
+      ShenandoahRuntimeCode::mark(&mark, &is_alive, false);
+      break;
+    }
+    case GLOBAL: {
+      ShenandoahMarkRefsClosure<GLOBAL> mark(queue, rp, nullptr);
+      ShenandoahRuntimeCode::mark(&mark, &is_alive, false);
+      break;
+    }
+    case YOUNG: {
+      // Keep every code reference during young-only collections. Reclamation is
+      // decided by global or old-generation marking.
+      ShenandoahMarkRefsClosure<YOUNG> mark(queue, rp, get_old_queue(worker_id));
+      ShenandoahRuntimeCode::mark(&mark, nullptr, false);
+      break;
+    }
+    default:
+      ShouldNotReachHere();
+  }
+}
+#endif // SVM
+
 void ShenandoahSTWMark::finish_mark(uint worker_id) {
   assert(ShenandoahHeap::heap()->gc_generation() == _generation, "Marking unexpected generation");
   ShenandoahPhaseTimings::Phase phase = _full_gc ? ShenandoahPhaseTimings::full_gc_mark : ShenandoahPhaseTimings::degen_gc_stw_mark;
-  ShenandoahWorkerTimingsTracker timer(phase, ShenandoahPhaseTimings::ParallelMark, worker_id);
+  ShenandoahWorkerTimingsTracker timer(phase, ShenandoahPhaseTimings::ParallelMark, worker_id, true /* cumulative */);
   ShenandoahReferenceProcessor* rp = _generation->ref_processor();
   shenandoah_assert_generations_reconciled();
   StringDedup::Requests requests;
