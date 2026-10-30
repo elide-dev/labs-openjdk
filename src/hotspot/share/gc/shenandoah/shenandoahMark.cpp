@@ -163,6 +163,9 @@ void ShenandoahMark::mark_runtime_code_work(bool remark) {
 
 void ShenandoahMark::clean_runtime_code() {
   if (SVMGlobalData::_clean_runtime_code_cache != nullptr) {
+    // Java cleanup can write heap references. Publish the stopped marking state
+    // before those stores can reach an already-deactivated SATB queue.
+    ShenandoahHeap::heap()->propagate_gc_state_to_all_threads();
     SVMGlobalData::_clean_runtime_code_cache(CompressedOops::base(), IsolateThread::current());
   }
 }
