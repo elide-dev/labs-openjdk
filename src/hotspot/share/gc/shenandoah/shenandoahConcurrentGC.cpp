@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2024, 2026, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2021, 2022, Red Hat, Inc. All rights reserved.
  * Copyright Amazon.com Inc. or its affiliates. All Rights Reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
@@ -24,6 +24,11 @@
  *
  */
 
+
+#ifdef SVM
+#include "code/codeCache.hpp"
+#include "code/nmethod.hpp"
+#endif
 
 #include "compiler/oopMap.hpp"
 #include "gc/shared/barrierSetNMethod.hpp"
@@ -830,6 +835,10 @@ public:
     ShenandoahEvacOOMScope oom_scope;
     ShenandoahEvacuateUpdateMetadataClosure cl;
     _thread_roots.oops_do(&cl, nullptr, worker_id);
+    if (worker_id == 0) {
+      NMethodToOopClosure code_cl(&cl, NMethodToOopClosure::FixRelocations);
+      CodeCache::nmethods_do(&code_cl);
+    }
   }
 };
 #endif // SVM
@@ -930,6 +939,8 @@ void ShenandoahConcurrentGC::op_final_mark() {
     ShenandoahTimingsTracker timing(ShenandoahPhaseTimings::final_mark_propagate_gc_state);
     heap->propagate_gc_state_to_all_threads();
   }
+  SVM_ONLY(ShenandoahMark::clean_runtime_code();)
+
 }
 
 bool ShenandoahConcurrentGC::has_in_place_promotions(ShenandoahHeap* heap) {

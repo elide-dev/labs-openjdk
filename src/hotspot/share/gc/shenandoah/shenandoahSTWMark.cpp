@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, 2022, Red Hat, Inc. All rights reserved.
+ * Copyright (c) 2021, 2026, Red Hat, Inc. All rights reserved.
  * Copyright Amazon.com Inc. or its affiliates. All Rights Reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
@@ -110,6 +110,7 @@ void ShenandoahSTWMark::mark() {
     assert(task_queues()->is_empty(), "Should be empty");
   }
 
+  SVM_ONLY(mark_runtime_code(false);)
   _generation->set_mark_complete();
   end_mark();
 
