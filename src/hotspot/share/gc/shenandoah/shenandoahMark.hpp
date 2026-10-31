@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, 2022, Red Hat, Inc. All rights reserved.
+ * Copyright (c) 2021, 2026, Red Hat, Inc. All rights reserved.
  * Copyright Amazon.com Inc. or its affiliates. All Rights Reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
@@ -64,6 +64,15 @@ public:
   // Loom support
   void start_mark();
   void end_mark();
+#ifdef SVM
+  void mark_runtime_code(bool remark);
+  static void clean_runtime_code();
+private:
+  friend class ShenandoahRuntimeCodeMarkTask;
+  void mark_runtime_code_work(bool remark);
+public:
+#endif
+
 
   // Helpers
   inline ShenandoahObjToScanQueueSet* task_queues() const;

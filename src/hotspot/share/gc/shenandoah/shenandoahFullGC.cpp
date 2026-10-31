@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2021, Red Hat, Inc. All rights reserved.
+ * Copyright (c) 2014, 2026, Red Hat, Inc. All rights reserved.
  * Copyright Amazon.com Inc. or its affiliates. All Rights Reserved.
  * Copyright (c) 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
@@ -292,6 +292,8 @@ void ShenandoahFullGC::do_it(GCCause::Cause gc_cause) {
     ShenandoahGCPhase phase(ShenandoahPhaseTimings::full_gc_heapdump_post);
     heap->post_full_gc_dump(_gc_timer);
   }
+  SVM_ONLY(ShenandoahMark::clean_runtime_code();)
+
 }
 
 void ShenandoahFullGC::phase1_mark_heap() {
