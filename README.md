@@ -326,3 +326,15 @@ This branch was originally based on `25+37-jvmci-b04` but the existing Shenandoa
 ```shell
 git checkout jdk-25.0.4+6 -- src/hotspot/share/gc/shenandoah/shenandoahHeapRegion.hpp
 ```
+
+## Shenandoah Runtime Compilation
+
+The Shenandoah libraries support Truffle runtime compilation with matching Native Image sources.
+Code installation applies load-reference and SATB barriers to references stored in runtime code and its metadata.
+At safepoints, code roots participate in marking and relocation, and unreachable code follows the Native Image code-unloading lifecycle.
+Young and old generational cycles retain code references; code unloading waits for a whole-heap collection.
+
+From the GraalVM _substratevm_ suite, run `mx shenandoah-truffle-test -H:CLibraryPath=<library-directory>` to build and execute the integration tests.
+Use `-H:ShenandoahDebugLevel=fastdebug` with the corresponding library to enable collector assertions.
+The tests exercise compiled functions across collections, including a collection while compiled guest frames remain active.
+The test command disables the unimplemented Shenandoah performance counters with `-XX:-UsePerfData`.

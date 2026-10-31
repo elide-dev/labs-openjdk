@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, 2022, Red Hat, Inc. All rights reserved.
+ * Copyright (c) 2021, 2026, Red Hat, Inc. All rights reserved.
  * Copyright Amazon.com Inc. or its affiliates. All Rights Reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
@@ -34,7 +34,142 @@
 #include "gc/shenandoah/shenandoahUtils.hpp"
 #include "gc/shenandoah/shenandoahVerifier.hpp"
 
+#ifdef SVM
+#include "code/codeCache.hpp"
+#include "code/nmethod.hpp"
+#include "gc/shenandoah/shenandoahRootProcessor.hpp"
+#include "runtime/threads.hpp"
+#include "svmGlobalData.hpp"
+#endif
+
 namespace svm_gc {
+
+#ifdef SVM
+// Match Native Image's CodeInfo lifecycle, as G1ConditionalMarkCodeCacheClosure does.
+// Decide weak liveness before marking code references. During SATB remark even
+// invalidated code's references must be traced to preserve the snapshot.
+class ShenandoahRuntimeCodeMarkClosure : public NMethodClosure {
+  OopClosure* _mark;
+  BoolObjectClosure* _is_alive;
+  bool _remark;
+  bool _unload;
+public:
+  ShenandoahRuntimeCodeMarkClosure(OopClosure* mark, BoolObjectClosure* is_alive, bool remark, bool unload) :
+    _mark(mark), _is_alive(is_alive), _remark(remark), _unload(unload) {}
+
+  void do_nmethod(nmethod* nm) override {
+    if (nm->are_all_objects_in_image_heap()) {
+      return;
+    }
+    oop tether = nm->tether();
+    if (_unload && tether != nullptr && !_is_alive->do_object_b(tether)) {
+      nmethod::NMethodState state = nm->state();
+      if (state == nmethod::state_removed_from_code_cache) {
+        if (_remark) {
+          nm->oops_do(_mark);
+        } else {
+          nm->oops_do_object_fields(_mark);
+        }
+        nm->set_state(nmethod::state_pending_free);
+        return;
+      }
+      if (state == nmethod::state_non_entrant ||
+          (TreatRuntimeCodeInfoReferencesAsWeak && state == nmethod::state_code_constants_live && nm->has_weak_reference_to_unreachable_object(_is_alive))) {
+        if (_remark) {
+          nm->oops_do(_mark);
+        } else {
+          nm->oops_do_object_fields(_mark);
+        }
+        nm->set_state(nmethod::state_pending_removal_from_code_cache);
+        return;
+      }
+    }
+    nm->oops_do(_mark);
+  }
+};
+
+class ShenandoahRuntimeCodeTetherClosure : public NMethodClosure {
+  OopClosure* _mark;
+public:
+  explicit ShenandoahRuntimeCodeTetherClosure(OopClosure* mark) : _mark(mark) {}
+  void do_nmethod(nmethod* nm) override { _mark->do_oop(nm->tether_addr()); }
+};
+
+class ShenandoahRuntimeCodeThreadClosure : public ThreadClosure {
+  NMethodClosure* _code;
+public:
+  explicit ShenandoahRuntimeCodeThreadClosure(NMethodClosure* code) : _code(code) {}
+  void do_thread(Thread* thread) override {
+    if (thread->is_Java_thread()) {
+      JavaThread::cast(thread)->nmethods_do(_code);
+    }
+  }
+};
+
+class ShenandoahRuntimeCodeMarkTask : public WorkerTask {
+  ShenandoahMark* _mark;
+  bool _remark;
+public:
+  ShenandoahRuntimeCodeMarkTask(ShenandoahMark* mark, bool remark) :
+    WorkerTask("Shenandoah Native Image Code Roots"), _mark(mark), _remark(remark) {}
+  void work(uint worker_id) override {
+    if (worker_id == 0) {
+      ShenandoahParallelWorkerSession session(worker_id);
+      _mark->mark_runtime_code_work(_remark);
+    }
+  }
+};
+
+void ShenandoahMark::mark_runtime_code(bool remark) {
+  if (SVMGlobalData::_fetch_code_infos != nullptr) {
+    CodeInfosPerThread* infos = remark ? Threads::set_java_code_infos() : nullptr;
+    ShenandoahRuntimeCodeMarkTask task(this, remark);
+    // Preserve the GC worker count and the queue-set reservation used by mark_loop.
+    // Only worker zero scans code metadata and drains the additional marking work.
+    ShenandoahHeap::heap()->workers()->run_task(&task);
+    if (remark) {
+      Threads::free_java_code_infos(infos);
+    }
+  }
+}
+
+void ShenandoahMark::mark_runtime_code_work(bool remark) {
+  ShenandoahHeap* heap = ShenandoahHeap::heap();
+  ShenandoahReferenceProcessor* rp = _generation->ref_processor();
+  TaskTerminator terminator(1, task_queues());
+  StringDedup::Requests requests;
+  // Global and non-generational marking use the same whole-heap closure.
+  // For a young cycle, code references are additional young roots; unloading
+  // waits for a whole-heap cycle so that old-generation liveness is available.
+  ShenandoahMarkRefsClosure<NON_GEN> all_cl(get_queue(0), rp, get_old_queue(0));
+  ShenandoahMarkRefsClosure<YOUNG> young_cl(get_queue(0), rp, get_old_queue(0));
+  ShenandoahMarkRefsClosure<OLD> old_cl(get_queue(0), rp, get_old_queue(0));
+  OopClosure* cl = _generation->is_young() ? static_cast<OopClosure*>(&young_cl) :
+                   _generation->is_old() ? static_cast<OopClosure*>(&old_cl) : static_cast<OopClosure*>(&all_cl);
+
+  if (remark) {
+    ShenandoahRuntimeCodeTetherClosure tethers(cl);
+    ShenandoahRuntimeCodeThreadClosure threads(&tethers);
+    Threads::threads_do(&threads);
+    mark_loop(0, &terminator, rp, _generation->type(), false, NO_DEDUP, &requests);
+    terminator.reset_for_reuse();
+  }
+
+  ShenandoahIsAliveClosure is_alive;
+  ShenandoahRuntimeCodeMarkClosure code(cl, &is_alive, remark, !_generation->is_young() && !_generation->is_old());
+  CodeCache::nmethods_do(&code);
+  mark_loop(0, &terminator, rp, _generation->type(), false, NO_DEDUP, &requests);
+}
+
+void ShenandoahMark::clean_runtime_code() {
+  if (SVMGlobalData::_clean_runtime_code_cache != nullptr) {
+    // Java cleanup can write heap references. Publish the stopped marking state
+    // before those stores can reach an already-deactivated SATB queue.
+    ShenandoahHeap::heap()->propagate_gc_state_to_all_threads();
+    SVMGlobalData::_clean_runtime_code_cache(CompressedOops::base(), IsolateThread::current());
+  }
+}
+#endif
 
 void ShenandoahMark::start_mark() {
   if (!CodeCache::is_gc_marking_cycle_active()) {
