@@ -711,7 +711,7 @@ public:
       size_t v = Atomic::fetch_then_add(&_claimed, 1u, memory_order_relaxed);
       if (v < _heap->num_regions()) {
         ShenandoahHeapRegion* r = _heap->get_region(v);
-        if (!in_generation(r)) {
+        if (!in_generation(r) SVM_ONLY(|| r->is_image_heap_or_metaspace())) {
           continue;
         }
 

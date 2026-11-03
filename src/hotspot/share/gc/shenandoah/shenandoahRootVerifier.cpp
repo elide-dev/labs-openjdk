@@ -33,6 +33,7 @@
 #include "gc/shenandoah/shenandoahAsserts.hpp"
 #include "gc/shenandoah/shenandoahGeneration.hpp"
 #include "gc/shenandoah/shenandoahHeap.inline.hpp"
+#include "gc/shenandoah/shenandoahHeapRegion.inline.hpp"
 #include "gc/shenandoah/shenandoahPhaseTimings.hpp"
 #include "gc/shenandoah/shenandoahRootVerifier.hpp"
 #include "gc/shenandoah/shenandoahScanRemembered.inline.hpp"
@@ -63,9 +64,29 @@ ShenandoahGCStateResetter::~ShenandoahGCStateResetter() {
   assert(_heap->gc_state() == _saved_gc_state, "Should be restored");
 }
 
+#ifdef SVM
+// Permanent objects have no marking bitmap, but their outgoing references are roots.
+static void permanent_roots_do(OopIterateClosure* oops) {
+  ShenandoahHeap* heap = ShenandoahHeap::heap();
+  for (size_t i = 0; i < heap->num_regions(); i++) {
+    ShenandoahHeapRegion* r = heap->get_region(i);
+    if (!r->is_image_heap_or_metaspace()) {
+      break;
+    }
+    if ((r->is_open_image_heap() || r->is_metaspace()) && !r->is_humongous_continuation()) {
+      HeapWord* top = r->top_acquire();
+      for (HeapWord* addr = r->bottom(); addr < top;) {
+        addr += cast_to_oop(addr)->oop_iterate_size(oops);
+      }
+    }
+  }
+}
+#endif // SVM
+
 void ShenandoahRootVerifier::roots_do(OopIterateClosure* oops) {
   ShenandoahGCStateResetter resetter;
   shenandoah_assert_safepoint();
+  SVM_ONLY(permanent_roots_do(oops);)
 
   NMethodToOopClosure blobs(oops, !NMethodToOopClosure::FixRelocations);
   CodeCache::nmethods_do(&blobs);
@@ -92,6 +113,7 @@ void ShenandoahRootVerifier::roots_do(OopIterateClosure* oops) {
 void ShenandoahRootVerifier::strong_roots_do(OopIterateClosure* oops) {
   ShenandoahGCStateResetter resetter;
   shenandoah_assert_safepoint();
+  SVM_ONLY(permanent_roots_do(oops);)
 #ifndef SVM
   CLDToOopClosure clds(oops, ClassLoaderData::_claim_none);
   ClassLoaderDataGraph::always_strong_cld_do(&clds);
