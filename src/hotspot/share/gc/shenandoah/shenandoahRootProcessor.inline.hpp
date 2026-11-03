@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, 2026, Red Hat, Inc. All rights reserved.
+ * Copyright (c) 2019, 2021, Red Hat, Inc. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,11 +24,6 @@
 
 #ifndef SHARE_GC_SHENANDOAH_SHENANDOAHROOTPROCESSOR_INLINE_HPP
 #define SHARE_GC_SHENANDOAH_SHENANDOAHROOTPROCESSOR_INLINE_HPP
-
-#ifdef SVM
-#include "code/codeCache.hpp"
-#include "code/nmethod.hpp"
-#endif
 
 #include "gc/shenandoah/shenandoahRootProcessor.hpp"
 
@@ -159,22 +154,9 @@ public:
 //      cache, because there could be the case of embedded class/oop in the generated code,
 //      which we will never visit during mark. Without code cache invalidation, as in (a),
 //      we risk executing that code cache blob, and crashing.
-#ifdef SVM
-class ShenandoahSVMMarkCodeTetherClosure : public NMethodClosure {
-  OopClosure* _oops;
-public:
-  explicit ShenandoahSVMMarkCodeTetherClosure(OopClosure* oops) : _oops(oops) {}
-  void do_nmethod(nmethod* nm) override { _oops->do_oop(nm->tether_addr()); }
-};
-#endif
-
 template <typename T>
 void ShenandoahSTWRootScanner::roots_do(T* oops, uint worker_id) {
-#ifdef SVM
-  ShenandoahSVMMarkCodeTetherClosure nmethods_cl(oops);
-#else
   MarkingNMethodClosure nmethods_cl(oops, !NMethodToOopClosure::FixRelocations, true /*FIXME*/);
-#endif
   NOT_SVM(CLDToOopClosure clds(oops, ClassLoaderData::_claim_strong);)
   ResourceMark rm;
 
@@ -184,7 +166,11 @@ void ShenandoahSTWRootScanner::roots_do(T* oops, uint worker_id) {
     _cld_roots.always_strong_cld_do(&clds, worker_id);
 #endif // !SVM
   } else {
-    _thread_roots.oops_do(oops, SVM_ONLY(&nmethods_cl) NOT_SVM(nullptr), worker_id);
+#ifdef SVM
+    _thread_roots.oops_do(oops, &nmethods_cl, worker_id);
+#else
+    _thread_roots.oops_do(oops, nullptr, worker_id);
+#endif
 #ifndef SVM
     _code_roots.nmethods_do(&nmethods_cl, worker_id);
     _cld_roots.cld_do(&clds, worker_id);
@@ -218,11 +204,11 @@ void ShenandoahRootUpdater::roots_do(uint worker_id, IsAlive* is_alive, KeepAliv
   // Process heavy-weight/fully parallel roots the last
   _code_roots.nmethods_do(codes_cl, worker_id);
 #else
-  _open_image_heap_roots.oops_do(keep_alive, worker_id);
   if (worker_id == 0) {
-    NMethodToOopClosure code_cl(keep_alive, NMethodToOopClosure::FixRelocations);
-    CodeCache::nmethods_do(&code_cl);
+    NMethodToOopClosure code(keep_alive, NMethodToOopClosure::FixRelocations);
+    CodeCache::nmethods_do(&code);
   }
+  _open_image_heap_roots.oops_do(keep_alive, worker_id);
 #endif // !SVM
   _thread_roots.oops_do(keep_alive, nullptr, worker_id);
 }

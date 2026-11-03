@@ -143,6 +143,10 @@ private:
     _open_image_heap_humongous_start = ShenandoahNIRegionType::OpenImageHeapStartsHumongous << _svm_region_state_shift,
      // humongous continuation region in the open image heap of the native image
     _open_image_heap_humongous_cont = ShenandoahNIRegionType::OpenImageHeapContinuesHumongous << _svm_region_state_shift,
+    // Permanent runtime metadata, including objects spanning multiple regions.
+    _metaspace = ShenandoahNIRegionType::Metaspace << _svm_region_state_shift,
+    _metaspace_humongous_start = ShenandoahNIRegionType::MetaspaceStartsHumongous << _svm_region_state_shift,
+    _metaspace_humongous_cont = ShenandoahNIRegionType::MetaspaceContinuesHumongous << _svm_region_state_shift,
 #endif // !SVM
     _REGION_STATES_NUM        // last
   };
@@ -167,6 +171,9 @@ public:
       case _closed_image_heap:                 return "Closed Image Heap";
       case _closed_image_heap_humongous_start: return "Closed Image Heap (Humongous Start)";
       case _closed_image_heap_humongous_cont:  return "Closed Image Heap (Humongous Continuation)";
+      case _metaspace: return "Metaspace";
+      case _metaspace_humongous_start: return "Metaspace (Humongous Start)";
+      case _metaspace_humongous_cont: return "Metaspace (Humongous Continuation)";
       case _open_image_heap:                   return "Open Image Heap";
       case _open_image_heap_humongous_start:   return "Open Image Heap (Humongous Start)";
       case _open_image_heap_humongous_cont:    return "Open Image Heap (Humongous Continuation)";
@@ -195,6 +202,9 @@ private:
       case _closed_image_heap:                 return _closed_image_heap;
       case _closed_image_heap_humongous_start: return _closed_image_heap_humongous_start;
       case _closed_image_heap_humongous_cont:  return _closed_image_heap_humongous_cont;
+      case _metaspace: return _metaspace;
+      case _metaspace_humongous_start: return _metaspace_humongous_start;
+      case _metaspace_humongous_cont: return _metaspace_humongous_cont;
       case _open_image_heap:                   return _open_image_heap;
       case _open_image_heap_humongous_start:   return _open_image_heap_humongous_start;
       case _open_image_heap_humongous_cont:    return _open_image_heap_humongous_cont;
@@ -236,10 +246,19 @@ public:
   bool is_regular()                const { return state() == _regular; }
   bool is_humongous_continuation() const { auto cur_state = state();
                                            return cur_state == _humongous_cont
-                                                  SVM_ONLY(|| cur_state == _closed_image_heap_humongous_cont || cur_state == _open_image_heap_humongous_cont); }
+                                                  SVM_ONLY(|| cur_state == _closed_image_heap_humongous_cont || cur_state == _open_image_heap_humongous_cont || cur_state == _metaspace_humongous_cont); }
   bool is_regular_pinned()         const { return state() == _pinned; }
   bool is_trash()                  const { return state() == _trash; }
 #ifdef SVM
+  bool is_metaspace() const {
+    auto cur_state = state();
+    return cur_state == _metaspace || cur_state == _metaspace_humongous_start || cur_state == _metaspace_humongous_cont;
+  }
+  bool is_image_heap_or_metaspace() const { return is_image_heap() || is_metaspace(); }
+  void make_metaspace_humongous(bool start) {
+    assert(is_metaspace(), "must be metaspace");
+    Atomic::release_store(&_state, start ? _metaspace_humongous_start : _metaspace_humongous_cont);
+  }
   bool is_closed_image_heap()      const { auto cur_state = state();
                                            return cur_state ==  _closed_image_heap ||
                                                   cur_state ==  _closed_image_heap_humongous_start ||
@@ -253,13 +272,13 @@ public:
   // Derived state predicates (boolean combinations of individual states)
   bool static is_empty_state(RegionState state) { return state == _empty_committed || state == _empty_uncommitted; }
   bool static is_humongous_start_state(RegionState state) { return state == _humongous_start || state == _pinned_humongous_start
-                                                                   SVM_ONLY(|| state == _closed_image_heap_humongous_start || state == _open_image_heap_humongous_start); }
+                                                                   SVM_ONLY(|| state == _closed_image_heap_humongous_start || state == _open_image_heap_humongous_start || state == _metaspace_humongous_start); }
   bool is_empty()                  const { return is_empty_state(this->state()); }
   bool is_active()                 const { auto cur_state = state(); return !is_empty_state(cur_state) && cur_state != _trash; }
   bool is_humongous_start()        const { return is_humongous_start_state(state()); }
   bool is_humongous()              const { auto cur_state = state();
                                            return is_humongous_start_state(cur_state) || cur_state == _humongous_cont
-                                                  SVM_ONLY(|| cur_state == _closed_image_heap_humongous_cont || cur_state == _open_image_heap_humongous_cont); }
+                                                  SVM_ONLY(|| cur_state == _closed_image_heap_humongous_cont || cur_state == _open_image_heap_humongous_cont || cur_state == _metaspace_humongous_cont); }
   bool is_committed()              const { return !is_empty_uncommitted(); }
   bool is_cset()                   const { auto cur_state = state(); return cur_state == _cset || cur_state == _pinned_cset; }
   bool is_pinned()                 const { auto cur_state = state(); return cur_state == _pinned || cur_state == _pinned_cset || cur_state == _pinned_humongous_start; }
@@ -500,6 +519,8 @@ public:
   // Find humongous start region that this region belongs to
   ShenandoahHeapRegion* humongous_start_region() const;
 
+  HeapWord* top_acquire() const { return Atomic::load_acquire(&_top); }
+  void set_top_release(HeapWord* v) { Atomic::release_store(&_top, v); }
   HeapWord* top() const         { return _top;     }
   void set_top(HeapWord* v)     { _top = v;        }
 

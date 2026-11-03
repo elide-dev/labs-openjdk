@@ -34,11 +34,19 @@ template <ShenandoahGenerationType GENERATION>
 class ShenandoahConcurrentMarkingTask;
 template <ShenandoahGenerationType GENERATION>
 class ShenandoahFinalMarkingTask;
+#ifdef SVM
+template <ShenandoahGenerationType GENERATION>
+class ShenandoahRemarkCodeTask;
+#endif
 class ShenandoahGeneration;
 
 class ShenandoahConcurrentMark: public ShenandoahMark {
   template <ShenandoahGenerationType GENERATION> friend class ShenandoahConcurrentMarkingTask;
   template <ShenandoahGenerationType GENERATION> friend class ShenandoahFinalMarkingTask;
+
+#ifdef SVM
+  template <ShenandoahGenerationType GENERATION> friend class ShenandoahRemarkCodeTask;
+#endif
 
 public:
   ShenandoahConcurrentMark(ShenandoahGeneration* generation);

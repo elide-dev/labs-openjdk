@@ -84,7 +84,7 @@ void ShenandoahGenerationalHeuristics::choose_collection_set(ShenandoahCollectio
     }
 
 #ifdef SVM
-    if (region->is_image_heap()) {
+    if (region->is_image_heap_or_metaspace()) {
       // We don't collect the image heap.
       continue;
     }

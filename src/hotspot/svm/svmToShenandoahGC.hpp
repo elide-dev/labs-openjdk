@@ -154,6 +154,11 @@ extern "C" {
 
   EXPORT_FOR_SVM jlong svm_gc_get_thread_allocated_memory(IsolateThread *thread);
 
+  EXPORT_FOR_SVM oop svm_gc_allocate_metaspace_instance(InstanceKlass *k);
+  EXPORT_FOR_SVM oop svm_gc_allocate_metaspace_array(Klass *k, int length, int allocation_kind);
+  EXPORT_FOR_SVM bool svm_gc_is_in_allocated_metaspace(void *address);
+  EXPORT_FOR_SVM void svm_gc_get_metaspace_statistics(MetaspaceStatistics *statistics);
+
   EXPORT_FOR_SVM jlong svm_gc_get_used_memory();
 
   EXPORT_FOR_SVM jlong svm_gc_get_free_memory();

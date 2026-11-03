@@ -70,7 +70,7 @@ struct ShenandoahRegionInfo {
   u_char *bottom;
   u_char *top;
   u_char *end;
-  char region_type;
+  int region_type;
 };
 
 struct ShenandoahInternalState {
@@ -86,4 +86,3 @@ struct ShenandoahInternalState {
 #endif
 
 #endif // SVM_SHENANDOAH_GC_STRUCTS_H
-

@@ -114,7 +114,7 @@ inline oop ShenandoahBarrierSet::load_reference_barrier(DecoratorSet decorators,
       !_heap->marking_context()->is_marked(obj)
       // For SVM we need an image heap check because image-heap objects are never reclaimed but
       // also never marked. This mirrors the image-heap guards in ShenandoahReferenceProcessor.
-      SVM_ONLY(&& !_heap->heap_region_containing(obj)->is_image_heap())) {
+      SVM_ONLY(&& !_heap->heap_region_containing(obj)->is_image_heap_or_metaspace())) {
     return nullptr;
   }
 
@@ -123,7 +123,7 @@ inline oop ShenandoahBarrierSet::load_reference_barrier(DecoratorSet decorators,
       _heap->is_concurrent_weak_root_in_progress() &&
       _heap->is_in_active_generation(obj) &&
       !_heap->marking_context()->is_marked_strong(obj)
-      SVM_ONLY(&& !_heap->heap_region_containing(obj)->is_image_heap())) {
+      SVM_ONLY(&& !_heap->heap_region_containing(obj)->is_image_heap_or_metaspace())) {
     return nullptr;
   }
 

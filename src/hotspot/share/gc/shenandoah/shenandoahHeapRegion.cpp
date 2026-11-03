@@ -455,6 +455,15 @@ void ShenandoahHeapRegion::print_on(outputStream* st) const {
       st->print("|CSP");
       break;
 #ifdef SVM
+    case _metaspace:
+      st->print("|M  ");
+      break;
+    case _metaspace_humongous_start:
+      st->print("|MH ");
+      break;
+    case _metaspace_humongous_cont:
+      st->print("|MC ");
+      break;
     case _closed_image_heap:
       st->print("|CI ");
       break;

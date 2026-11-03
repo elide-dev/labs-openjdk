@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, 2026, Red Hat, Inc. All rights reserved.
+ * Copyright (c) 2019, 2020, Red Hat, Inc. All rights reserved.
  * Copyright Amazon.com Inc. or its affiliates. All Rights Reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
@@ -55,13 +55,10 @@ ShenandoahSuperClosure::ShenandoahSuperClosure(ShenandoahReferenceProcessor* rp)
   MetadataVisitingOopIterateClosure(rp), _heap(ShenandoahHeap::heap()) {}
 
 void ShenandoahSuperClosure::do_nmethod(nmethod* nm) {
-#ifdef SVM
-  // A compiled frame in a stack chunk keeps its Native Image code tether alive.
-  do_oop(nm->tether_addr());
-#else
+#ifndef SVM
   nm->run_nmethod_entry_barrier();
+#endif // !SVM
   Unimplemented();
-#endif // SVM
 }
 
 //

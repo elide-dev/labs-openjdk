@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, 2026, Red Hat, Inc. All rights reserved.
+ * Copyright (c) 2021, Red Hat, Inc. All rights reserved.
  * Copyright Amazon.com Inc. or its affiliates. All Rights Reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
@@ -46,6 +46,10 @@
 #include "runtime/vmThread.hpp"
 #include "utilities/events.hpp"
 
+#ifdef SVM
+#include "gc/shenandoah/shenandoahRuntimeCode.hpp"
+#endif
+
 namespace svm_gc {
 
 ShenandoahDegenGC::ShenandoahDegenGC(ShenandoahDegenPoint degen_point, ShenandoahGeneration* generation) :
@@ -90,8 +94,14 @@ void ShenandoahDegenGC::entry_degenerated() {
 
   heap->set_degenerated_gc_in_progress(true);
   op_degenerated();
+#ifdef SVM
+  if (SVMGlobalData::_clean_runtime_code_cache != nullptr) {
+    // A degenerated mark can condemn code just like full marking. Finish
+    // invalidation after relocation, including cycles with no collection set.
+    ShenandoahRuntimeCode::clean();
+  }
+#endif
   heap->set_degenerated_gc_in_progress(false);
-  SVM_ONLY(ShenandoahMark::clean_runtime_code();)
   {
     ShenandoahTimingsTracker timing(ShenandoahPhaseTimings::degen_gc_propagate_gc_state);
     heap->propagate_gc_state_to_all_threads();

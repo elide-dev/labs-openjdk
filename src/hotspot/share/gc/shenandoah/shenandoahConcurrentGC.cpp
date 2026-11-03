@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024, 2026, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2024, 2025, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2021, 2022, Red Hat, Inc. All rights reserved.
  * Copyright Amazon.com Inc. or its affiliates. All Rights Reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
@@ -24,11 +24,6 @@
  *
  */
 
-
-#ifdef SVM
-#include "code/codeCache.hpp"
-#include "code/nmethod.hpp"
-#endif
 
 #include "compiler/oopMap.hpp"
 #include "gc/shared/barrierSetNMethod.hpp"
@@ -60,6 +55,10 @@
 #include "prims/jvmtiTagMap.hpp"
 #include "runtime/vmThread.hpp"
 #include "utilities/events.hpp"
+
+#ifdef SVM
+#include "gc/shenandoah/shenandoahRuntimeCode.hpp"
+#endif
 
 namespace svm_gc {
 
@@ -836,8 +835,10 @@ public:
     ShenandoahEvacuateUpdateMetadataClosure cl;
     _thread_roots.oops_do(&cl, nullptr, worker_id);
     if (worker_id == 0) {
-      NMethodToOopClosure code_cl(&cl, NMethodToOopClosure::FixRelocations);
-      CodeCache::nmethods_do(&code_cl);
+      // Embedded constants have no load-reference barrier. Canonicalize every
+      // code root while mutators are stopped, before concurrent evacuation.
+      NMethodToOopClosure code(&cl, NMethodToOopClosure::FixRelocations);
+      CodeCache::nmethods_do(&code);
     }
   }
 };
@@ -854,6 +855,11 @@ void ShenandoahConcurrentGC::op_final_mark() {
 
   if (!heap->cancelled_gc()) {
     _mark.finish_mark();
+#ifdef SVM
+    if (SVMGlobalData::_clean_runtime_code_cache != nullptr) {
+      ShenandoahRuntimeCode::clean();
+    }
+#endif
     assert(!heap->cancelled_gc(), "STW mark cannot OOM");
 
     // Notify JVMTI that the tagmap table will need cleaning.
@@ -939,8 +945,6 @@ void ShenandoahConcurrentGC::op_final_mark() {
     ShenandoahTimingsTracker timing(ShenandoahPhaseTimings::final_mark_propagate_gc_state);
     heap->propagate_gc_state_to_all_threads();
   }
-  SVM_ONLY(ShenandoahMark::clean_runtime_code();)
-
 }
 
 bool ShenandoahConcurrentGC::has_in_place_promotions(ShenandoahHeap* heap) {
