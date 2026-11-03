@@ -338,3 +338,12 @@ From the GraalVM _substratevm_ suite, run `mx shenandoah-truffle-test -H:CLibrar
 Use `-H:ShenandoahDebugLevel=fastdebug` with the corresponding library to enable collector assertions.
 The tests exercise compiled functions across collections, including a collection while compiled guest frames remain active.
 The test command disables the unimplemented Shenandoah performance counters with `-XX:-UsePerfData`.
+
+## Shenandoah Runtime Metaspace
+
+The Native Image interface version is `250502`.
+Build matching Java and native collector sources together.
+Runtime-loaded classes use a bounded, permanent metaspace reservation with lazy commitment.
+Garbage collection scans references from metadata into the Java heap.
+Metaspace exhaustion raises `OutOfMemoryError`; class unloading and multiple isolates are not supported.
+The runtime-code implementation publishes collector state before invoking Java code-cache cleanup.
