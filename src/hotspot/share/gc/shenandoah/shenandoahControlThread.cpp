@@ -53,6 +53,9 @@ ShenandoahControlThread::ShenandoahControlThread() :
 }
 
 void ShenandoahControlThread::run_service() {
+#ifdef SVM
+  svm_wait_for_vm_operation_thread();
+#endif // SVM
   ShenandoahHeap* const heap = ShenandoahHeap::heap();
   const GCMode default_mode = concurrent_normal;
   const GCCause::Cause default_cause = GCCause::_shenandoah_concurrent_gc;

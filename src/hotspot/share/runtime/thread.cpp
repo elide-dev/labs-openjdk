@@ -66,7 +66,7 @@ THREAD_LOCAL Thread* Thread::_thr_current = nullptr;
 bool Thread::is_VM_thread() const {
   // this method is also called before the VM operation thread is started
   IsolateThread *isolate_thread = RawAccess<>::load_at(SVMIsolateData::_vm_operation_thread, SVMGlobalData::_offsets._vm_operation_thread._isolate_thread);
-  return this == isolate_thread->java_thread();
+  return isolate_thread != nullptr && this == isolate_thread->java_thread();
 }
 #endif // SVM
 

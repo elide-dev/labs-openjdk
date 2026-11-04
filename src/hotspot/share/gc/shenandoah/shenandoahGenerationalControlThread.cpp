@@ -62,7 +62,9 @@ ShenandoahGenerationalControlThread::ShenandoahGenerationalControlThread() :
 }
 
 void ShenandoahGenerationalControlThread::run_service() {
-
+#ifdef SVM
+  svm_wait_for_vm_operation_thread();
+#endif // SVM
   const int64_t wait_ms = ShenandoahPacing ? ShenandoahControlIntervalMin : 0;
   ShenandoahGCRequest request;
   while (!should_terminate()) {

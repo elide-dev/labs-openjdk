@@ -87,6 +87,9 @@ public:
   // Notify threads waiting for GC to complete.
   void notify_alloc_failure_waiters();
 #ifdef SVM
+  // Background collections require the Native Image VM operation thread to be attached.
+  void svm_wait_for_vm_operation_thread();
+
   // Try-lock variant for the VM operation thread, which may run at a safepoint. Blocking on the
   // '_alloc_failure_waiters_lock' monitor can deadlock because a mutator at a safepoint can hold
   // the monitor's mutex across its native->VM transition.

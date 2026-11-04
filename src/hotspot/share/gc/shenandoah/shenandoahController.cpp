@@ -108,6 +108,20 @@ void ShenandoahController::notify_alloc_failure_waiters() {
 }
 
 #ifdef SVM
+void ShenandoahController::svm_wait_for_vm_operation_thread() {
+  // The native heap starts its control thread before Native Image starts its Java VM operation
+  // thread. Small initial heaps can trigger a collection in that window. Match the volatile
+  // publication in VMOperationThread.run() before attempting to enqueue any GC VM operation.
+  while (!should_terminate()) {
+    IsolateThread* isolate_thread = RawAccess<MO_ACQUIRE>::load_at(SVMIsolateData::_vm_operation_thread,
+                                                               SVMGlobalData::_offsets._vm_operation_thread._isolate_thread);
+    if (isolate_thread != nullptr) {
+      return;
+    }
+    os::naked_short_sleep(1);
+  }
+}
+
 void ShenandoahController::svm_acquire_cycle_ownership() {
   // Called by a Control thread before it runs a cycle. Only contended with an inline GC on the VM
   // operation thread, so the wait below is bounded by that GC.
