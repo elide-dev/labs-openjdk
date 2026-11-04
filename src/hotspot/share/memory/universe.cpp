@@ -133,7 +133,11 @@ ObjArrayKlass* Universe::_objectArrayKlass            = nullptr;
 
 namespace svm_gc {
 
+#ifdef SVM
 TypeArrayKlass* Universe::_fillerArrayKlass           = nullptr;
+#else
+Klass* Universe::_fillerArrayKlass                    = nullptr;
+#endif // SVM
 #ifndef SVM
 OopHandle Universe::_basic_type_mirrors[T_VOID+1];
 #if INCLUDE_CDS_JAVA_HEAP

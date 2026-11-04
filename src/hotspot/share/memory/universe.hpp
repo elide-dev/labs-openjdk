@@ -87,7 +87,11 @@ public:
 #endif // SVM
   // Special int-Array that represents filler objects that are used by GC to overwrite
   // dead objects. References to them are generally an error.
+#ifdef SVM
   static TypeArrayKlass* _fillerArrayKlass;
+#else
+  static Klass* _fillerArrayKlass;
+#endif // SVM
 
 #ifndef SVM
   // Known objects in the VM
@@ -223,7 +227,11 @@ public:
   static ObjArrayKlass* objectArrayKlass()       { return _objectArrayKlass; }
 #endif // !SVM
 
+#ifdef SVM
   static TypeArrayKlass* fillerArrayKlass()      { return _fillerArrayKlass; }
+#else
+  static Klass* fillerArrayKlass()               { return _fillerArrayKlass; }
+#endif // SVM
 
 #ifndef SVM
   static TypeArrayKlass* typeArrayKlass(BasicType t) {
@@ -405,6 +413,7 @@ public:
   static bool should_verify_subset(uint subset);
   static void verify(VerifyOption option, const char* prefix);
 
+#ifndef SVM
   static void verify(const char* prefix) {
     verify(VerifyOption::Default, prefix);
   }
@@ -412,7 +421,6 @@ public:
     verify("");
   }
 
-#ifndef SVM
   static int  verify_count()       { return _verify_count; }
   static void print_on(outputStream* st);
   static void print_heap_at_SIGBREAK();
