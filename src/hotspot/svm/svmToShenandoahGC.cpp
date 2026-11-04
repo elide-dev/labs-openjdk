@@ -119,7 +119,7 @@ EXPORT_FOR_SVM void svm_gc_parse_options(int actual_native_image_version, int ar
     size_t max_heap_address_space_size, size_t heap_base_alignment, size_t null_regions_size, size_t metaspace_size, size_t image_heap_size,
     int compressed_reference_shift, bool is_containerized, jlong container_memory_limit_in_bytes, int container_active_processor_count, ShenandoahHeapOptions *result) {
   // verify invariants
-  int expected_native_image_version = 250502;
+  int expected_native_image_version = 250600;
   guarantee(actual_native_image_version >= expected_native_image_version, "incompatible GC version: the native-image tries to use a GC that is too new");
   guarantee(actual_native_image_version <= expected_native_image_version, "incompatible GC version: the native-image tries to use a GC that is too old");
 #ifdef SVM_COMPRESSED_REFERENCES
@@ -177,7 +177,7 @@ EXPORT_FOR_SVM ShenandoahInitState* svm_gc_create(IsolateThread *isolate_thread,
     objArrayOop static_object_fields, typeArrayOop static_primitive_fields, oop vm_operation_thread, oop safepoint, oop runtime_code_info_memory,
     int reference_map_compressed_offset_shift, SVMOopMap *thread_locals_reference_map,
     objArrayOop klasses_assumed_reachable_for_code_unloading, bool perf_data_support, bool closed_type_world,
-    bool use_interface_hashing, int interface_hashing_max_id, int dynamic_hub_hashing_interface_mask, int dynamic_hub_hashing_shift_offset,
+    bool use_interface_hashing, bool use_pext_interface_hashing, int interface_hashing_max_id, int dynamic_hub_hashing_shift_offset,
     char *offsets, int offsets_length,
     queueVmOperationFunc collect_for_allocation_op, queueVmOperationFunc collect_full_op, queueVmOperationFunc collect_degenerated_op, queueVmOperationFunc init_mark_op, queueVmOperationFunc final_mark_op, queueVmOperationFunc init_update_refs_op, queueVmOperationFunc final_update_refs_op, queueVmOperationFunc final_roots_op, queueVmOperationFunc handshake_fallback_op,
     vmOperationStatusFunc wait_for_vm_operation_execution_status, vmOperationStatusFunc update_vm_operation_execution_status,
@@ -236,7 +236,6 @@ EXPORT_FOR_SVM ShenandoahInitState* svm_gc_create(IsolateThread *isolate_thread,
   guarantee(slow_transition_native_to_vm != nullptr, "must be");
   guarantee(lock_threads_read != nullptr, "must be");
   guarantee(unlock_threads_read != nullptr, "must be");
-  guarantee(dynamic_hub_hashing_interface_mask == DynamicHubHashingInterfaceMask, "must be");
   guarantee(dynamic_hub_hashing_shift_offset == DynamicHubHashingShiftOffset, "must be");
 
   // apply arguments
@@ -263,6 +262,7 @@ EXPORT_FOR_SVM ShenandoahInitState* svm_gc_create(IsolateThread *isolate_thread,
   SVMGlobalData::_thread_locals_reference_map = thread_locals_reference_map;
   SVMGlobalData::_closed_type_world = closed_type_world;
   SVMGlobalData::_use_interface_hashing = use_interface_hashing;
+  SVMGlobalData::_use_pext_interface_hashing = use_pext_interface_hashing;
   SVMGlobalData::_interface_hashing_max_id = interface_hashing_max_id;
   SVMGlobalData::_collect_for_allocation_op = collect_for_allocation_op;
   SVMGlobalData::_collect_full_op = collect_full_op;
@@ -934,7 +934,7 @@ EXPORT_FOR_SVM oop svm_gc_allocate_metaspace_instance(InstanceKlass *k) {
 // TO_VM - May be called by any Java thread. Uses oops. May block.
 EXPORT_FOR_SVM oop svm_gc_allocate_metaspace_array(Klass *k, int length, int allocation_kind) {
   assert(IsolateThread::current()->has_status_vm(), "unexpected thread state");
-  guarantee(allocation_kind >= ShenandoahMetaspace::DynamicHubAllocation && allocation_kind <= ShenandoahMetaspace::IntArrayAllocation, "invalid allocation kind");
+  guarantee(allocation_kind >= ShenandoahMetaspace::DynamicHubAllocation && allocation_kind <= ShenandoahMetaspace::LongArrayAllocation, "invalid allocation kind");
   return ShenandoahMetaspace::allocate_array(k, length, static_cast<ShenandoahMetaspace::AllocationKind>(allocation_kind));
 }
 
@@ -953,6 +953,8 @@ EXPORT_FOR_SVM void svm_gc_get_metaspace_statistics(MetaspaceStatistics *statist
   statistics->byte_array_size = ShenandoahMetaspace::allocation_size(ShenandoahMetaspace::ByteArrayAllocation);
   statistics->int_array_count = ShenandoahMetaspace::allocation_count(ShenandoahMetaspace::IntArrayAllocation);
   statistics->int_array_size = ShenandoahMetaspace::allocation_size(ShenandoahMetaspace::IntArrayAllocation);
+  statistics->long_array_count = ShenandoahMetaspace::allocation_count(ShenandoahMetaspace::LongArrayAllocation);
+  statistics->long_array_size = ShenandoahMetaspace::allocation_size(ShenandoahMetaspace::LongArrayAllocation);
   statistics->object_count = ShenandoahMetaspace::allocation_count(ShenandoahMetaspace::ObjectAllocation);
   statistics->object_size = ShenandoahMetaspace::allocation_size(ShenandoahMetaspace::ObjectAllocation);
 }

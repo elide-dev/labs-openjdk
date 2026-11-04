@@ -413,7 +413,7 @@ public:
   static bool should_verify_subset(uint subset);
   static void verify(VerifyOption option, const char* prefix);
 
-#ifndef SVM
+  // Shenandoah also uses these convenience overloads in the reduced Native Image build.
   static void verify(const char* prefix) {
     verify(VerifyOption::Default, prefix);
   }
@@ -421,6 +421,7 @@ public:
     verify("");
   }
 
+#ifndef SVM
   static int  verify_count()       { return _verify_count; }
   static void print_on(outputStream* st);
   static void print_heap_at_SIGBREAK();

@@ -341,9 +341,12 @@ The test command disables the unimplemented Shenandoah performance counters with
 
 ## Shenandoah Runtime Metaspace
 
-The Native Image interface version is `250502`.
+The Native Image interface version is `250600`.
 Build matching Java and native collector sources together.
 Runtime-loaded classes use a bounded, permanent metaspace reservation with lazy commitment.
 Garbage collection scans references from metadata into the Java heap.
 Metaspace exhaustion raises `OutOfMemoryError`; class unloading and multiple isolates are not supported.
 The runtime-code implementation publishes collector state before invoking Java code-cache cleanup.
+
+The 25.6 interface also supports `long[]` metadata and both shift-and-mask and PEXT interface hashing.
+Rebuild both collectors with the matching Java sources; the interface version rejects 25.5 libraries.

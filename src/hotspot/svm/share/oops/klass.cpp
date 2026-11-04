@@ -114,13 +114,26 @@ bool Klass::is_subtype_of(const Klass* other) const {
       if (SVMGlobalData::_use_interface_hashing && interface_id <= SVMGlobalData::_interface_hashing_max_id) {
         // perform interface hashing check
         uint32_t hash_param = static_cast<uint32_t>(load_jint(other, SVMGlobalData::_offsets._dynamicHub._open_type_world_interface_hash_param));
-        int shift = hash_param >> DynamicHubHashingShiftOffset;
-
+        uint32_t hash;
+        if (SVMGlobalData::_use_pext_interface_hashing) {
+          // Portable PEXT: pack the selected interface-ID bits in increasing bit order.
+          // Do not require the native collector library's host to support BMI2.
+          hash = 0;
+          uint32_t output_bit = 1;
+          for (uint32_t mask = hash_param; mask != 0; mask &= mask - 1) {
+            uint32_t selected_bit = mask & (0u - mask);
+            if ((interface_id & selected_bit) != 0) {
+              hash |= output_bit;
+            }
+            output_bit <<= 1;
+          }
+        } else {
+          int shift = hash_param >> DynamicHubHashingShiftOffset;
+          hash = (interface_id >> shift) & hash_param;
+        }
         typeArrayOop hash_table = (typeArrayOop)load_oop(other, SVMGlobalData::_offsets._dynamicHub._open_type_world_interface_hash_table);
-        int hash = (interface_id >> shift) & hash_param;
-
-        jint hash_table_entry = hash_table->int_at(hash);
-        return (hash_table_entry & DynamicHubHashingInterfaceMask) == interface_id;
+        jlong hash_table_entry = hash_table->long_at(hash);
+        return static_cast<uint32_t>(hash_table_entry) == interface_id;
       } else {
         // perform iterative interface check
         jshort checked_num_iterable_interface_types = load_jshort(other, SVMGlobalData::_offsets._dynamicHub._open_type_world_num_iterable_interface_types);
