@@ -42,10 +42,11 @@ class VMThread {
   static VM_Operation* _cur_vm_operation; // Current VM operation
 
  public:
-  // Returns the current vm operation if any.
+  // Returns the current vm operation if any. Unlike in HotSpot, any thread may call this: the
+  // value is published by the VM operation thread while it executes the operation at a safepoint,
+  // so other threads use it to tell which operation the current safepoint belongs to.
   static VM_Operation* vm_operation()             {
-    assert(Thread::current()->is_VM_thread(), "Must be");
-    return _cur_vm_operation;
+    return Atomic::load(&_cur_vm_operation);
   }
 
   // Sets the currently executing VM operation and returns the previous one.
@@ -57,13 +58,13 @@ class VMThread {
   static VM_Operation* set_current_vm_operation(VM_Operation* op) {
     assert(Thread::current()->is_VM_thread(), "Must be");
     VM_Operation* prev = _cur_vm_operation;
-    _cur_vm_operation = op;
+    Atomic::store(&_cur_vm_operation, op);
     return prev;
   }
 
   static void restore_current_vm_operation(VM_Operation* prev) {
     assert(Thread::current()->is_VM_thread(), "Must be");
-    _cur_vm_operation = prev;
+    Atomic::store(&_cur_vm_operation, prev);
   }
 
   // Execution of vm operation
