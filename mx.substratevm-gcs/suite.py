@@ -32,7 +32,9 @@ suite = {
     "capture_suite_commit_info": True,
 
     "libraries" : {
-        "MUSL_GCC_TOOLCHAIN" : {
+        # Keep the standalone fallback distinct from sdk:MUSL_GCC_TOOLCHAIN. Both suites can
+        # be imported on platforms where this optional library has no platform-specific digest.
+        "SVM_GC_MUSL_GCC_TOOLCHAIN" : {
             "packedResource": True,
             "os_arch": {
                 "linux": {
@@ -226,7 +228,7 @@ suite = {
                 ]
             },
             "os_arch": {
-                # Shenandoah currently only supports linux/amd64 and linux/aarch64.
+                # Shenandoah supports Linux/AMD64, Linux/AArch64, and Darwin/AArch64.
                 "linux": {
                     "amd64": {
                         "layout": {
@@ -280,6 +282,24 @@ suite = {
                                 "source_type": "dependency",
                                 "dependency": "hotspot",
                                 "path": "<os>-<arch>/glibc/<staticlib:shenandoahgc-ur>",
+                                "optional": True,
+                            },
+                        },
+                    },
+                },
+                "darwin": {
+                    "aarch64": {
+                        "layout": {
+                            "<os>-<arch>/<staticlib:shenandoahgc-cr>": {
+                                "source_type": "dependency",
+                                "dependency": "hotspot",
+                                "path": "<os>-<arch>/default/<staticlib:shenandoahgc-cr>",
+                                "optional": True,
+                            },
+                            "<os>-<arch>/<staticlib:shenandoahgc-ur>": {
+                                "source_type": "dependency",
+                                "dependency": "hotspot",
+                                "path": "<os>-<arch>/default/<staticlib:shenandoahgc-ur>",
                                 "optional": True,
                             },
                         },

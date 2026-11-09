@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2019, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -91,6 +91,23 @@ static inline jlong convert_size_t_to_jlong(size_t val) {
   NOT_LP64 (return (jlong)val;)
   LP64_ONLY(return (jlong)MIN2(val, (size_t)max_jlong);)
 }
+
+// Runtime code stores references outside the Java heap. Resolve an evacuating reference
+// before publishing it, and retain its SATB value if a marking cycle is active.
+class ShenandoahRegisterCodeRootsClosure : public OopClosure {
+  template <typename T> void do_oop_work(T* p) {
+    T value = RawAccess<>::oop_load(p);
+    if (CompressedOops::is_null(value)) {
+      return;
+    }
+    ShenandoahBarrierSet* bs = ShenandoahBarrierSet::barrier_set();
+    oop obj = bs->load_reference_barrier(ON_STRONG_OOP_REF, CompressedOops::decode_not_null(value), p);
+    bs->satb_enqueue(obj);
+  }
+public:
+  void do_oop(oop* p) override { do_oop_work(p); }
+  void do_oop(narrowOop* p) override { do_oop_work(p); }
+};
 
 extern "C" {
 // NO_TRANSITION - This method is called during startup, before anything else is initialized.
@@ -781,7 +798,8 @@ EXPORT_FOR_SVM void svm_gc_register_object_fields(nmethod* nm) {
   assert(IsolateThread::current()->has_status_java(), "unexpected thread state");
   assert(nm->state() == nmethod::state_code_constants_live, "must be");
 
-  Unimplemented();
+  ShenandoahRegisterCodeRootsClosure cl;
+  nm->oops_do_object_fields(&cl);
 }
 
 // NO_TRANSITION - Almost uninterruptible code that may be called from any Java thread.
@@ -789,7 +807,8 @@ EXPORT_FOR_SVM void svm_gc_register_code_constants(nmethod* nm) {
   assert(IsolateThread::current()->has_status_java(), "unexpected thread state");
   assert(nm->state() == nmethod::state_code_constants_live, "must be");
 
-  Unimplemented();
+  ShenandoahRegisterCodeRootsClosure cl;
+  nm->oops_do_code_constants(&cl);
 }
 
 // NO_TRANSITION - Almost uninterruptible code that may be called from any Java thread.
@@ -797,7 +816,8 @@ EXPORT_FOR_SVM void svm_gc_register_frame_metadata(nmethod* nm) {
   assert(IsolateThread::current()->has_status_java(), "unexpected thread state");
   assert(nm->state() == nmethod::state_code_constants_live, "must be");
 
-  Unimplemented();
+  ShenandoahRegisterCodeRootsClosure cl;
+  nm->oops_do_frame_metadata(&cl);
 }
 
 // NO_TRANSITION - Almost uninterruptible code that may be called from any Java thread.
@@ -805,7 +825,8 @@ EXPORT_FOR_SVM void svm_gc_register_deopt_metadata(nmethod* nm) {
   assert(IsolateThread::current()->has_status_java(), "unexpected thread state");
   assert(nm->state() == nmethod::state_code_constants_live, "must be");
 
-  Unimplemented();
+  ShenandoahRegisterCodeRootsClosure cl;
+  nm->oops_do_deopt_metadata(&cl);
 }
 
 // NO_TRANSITION - Only called when printing diagnostics.

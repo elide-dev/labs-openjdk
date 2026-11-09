@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2021, Red Hat, Inc. All rights reserved.
+ * Copyright (c) 2015, 2026, Red Hat, Inc. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,6 +22,11 @@
  *
  */
 
+
+#ifdef SVM
+#include "code/codeCache.hpp"
+#include "code/nmethod.hpp"
+#endif
 
 #include "classfile/classLoaderData.hpp"
 #include "code/nmethod.hpp"
@@ -301,6 +306,10 @@ void ShenandoahRootAdjuster::roots_do(uint worker_id, OopClosure* oops) {
   _thread_roots.oops_do(oops, nullptr, worker_id);
 #ifdef SVM
   _open_image_heap_roots.oops_do(oops, worker_id);
+  if (worker_id == 0) {
+    NMethodToOopClosure code_cl(oops, NMethodToOopClosure::FixRelocations);
+    CodeCache::nmethods_do(&code_cl);
+  }
 #endif // SVM
 }
 

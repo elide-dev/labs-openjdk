@@ -129,15 +129,15 @@ def mx_register_dynamic_suite_constituents(register_project, register_distributi
     if os_arch_couplet == 'linux_amd64' and mx.suite("sdk", fatalIfMissing=False) is None:
         # graal/sdk is not available, use a replacement for sdk:MUSL_NINJA_TOOLCHAIN
         mx.log("Registering replacement MUSL_NINJA_TOOLCHAIN")
-        deps = ["MUSL_GCC_TOOLCHAIN", "mx:GCC_NINJA_TOOLCHAIN"]
+        deps = ["SVM_GC_MUSL_GCC_TOOLCHAIN", "mx:GCC_NINJA_TOOLCHAIN"]
         layout = {
             "toolchain.ninja": {
                 "source_type": "string",
                 "value": (
                     "include <ninja-toolchain:GCC_NINJA_TOOLCHAIN>\n"
-                    "CC=<path:MUSL_GCC_TOOLCHAIN>/musl-toolchain/bin/x86_64-linux-musl-gcc\n"
-                    "CXX=<path:MUSL_GCC_TOOLCHAIN>/musl-toolchain/bin/x86_64-linux-musl-g++\n"
-                    "AR=<path:MUSL_GCC_TOOLCHAIN>/musl-toolchain/bin/x86_64-linux-musl-ar\n"
+                    "CC=<path:SVM_GC_MUSL_GCC_TOOLCHAIN>/musl-toolchain/bin/x86_64-linux-musl-gcc\n"
+                    "CXX=<path:SVM_GC_MUSL_GCC_TOOLCHAIN>/musl-toolchain/bin/x86_64-linux-musl-g++\n"
+                    "AR=<path:SVM_GC_MUSL_GCC_TOOLCHAIN>/musl-toolchain/bin/x86_64-linux-musl-ar\n"
                 ),
             },
         }
