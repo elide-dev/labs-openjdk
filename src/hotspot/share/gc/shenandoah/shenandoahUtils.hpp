@@ -174,9 +174,20 @@ public:
     // at Shenandoah safepoint, but at something else.
     if (thr == ShenandoahHeap::heap()->control_thread()) return false;
 
+#ifndef SVM
     // This is not VM thread, cannot see what VM thread is doing,
     // so pretend this is a proper Shenandoah safepoint
     if (!thr->is_VM_thread()) return true;
+#else
+    // In SVM, the VM operation thread publishes the operation it is executing (see
+    // svm_gc_execute_vm_operation_main()), so every thread can check the operation type.
+    // Native Image safepoints are frequent and most of them are not GC operations (thread
+    // enumeration, code installation and invalidation, deoptimization, ...). Concurrent GC
+    // workers that are not in the suspendible thread set, e.g. old-generation coalesce-and-fill,
+    // keep running through them. Pretending that such a safepoint is a Shenandoah safepoint makes
+    // shenandoah_assert_generations_reconciled() compare the active and the GC generation in the
+    // middle of a concurrent phase, where they legitimately differ.
+#endif // !SVM
 
     // Otherwise check we are at proper operation type
     VM_Operation* vm_op = VMThread::vm_operation();
